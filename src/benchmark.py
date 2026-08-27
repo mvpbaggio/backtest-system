@@ -55,7 +55,7 @@ def _infer_exit_mode(sig: np.ndarray, th: float) -> str:
 def evaluate_engine(
     engine_fn,
     codes: list[str] | None = None,
-    n_sample: int | None = 100,
+    n_sample: int | None = 500,
     th: float = 25,
     tp: float = 2.5,
     be: bool = True,

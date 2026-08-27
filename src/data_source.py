@@ -88,14 +88,20 @@ def adjust_qfq(df: pd.DataFrame, code: str) -> pd.DataFrame:
     return df
 
 
-def load_kline(code: str, count: int = 2545, cache_dir: str = "./cache") -> pd.DataFrame:
-    """拉取单票前复权日线，带本地缓存。返回列 date/open/high/low/close/vol。"""
+def load_kline(code: str, count: int = 2545, cache_dir: str = "./cache", max_age_days: int = 7) -> pd.DataFrame:
+    """拉取单票前复权日线，带本地缓存。返回列 date/open/high/low/close/vol。
+
+    max_age_days: 缓存过期天数。缓存文件超过 N 天(或行数不足)自动重新拉取，
+    保证数据不过期(默认 7 天即一周自动更新)。
+    """
     os.makedirs(cache_dir, exist_ok=True)
+    import time as _time
     cf = os.path.join(cache_dir, f"{code}.pkl")
     try:
         with open(cf, "rb") as f:
             df = pickle.load(f)
-        if len(df) >= count:
+        age_days = (_time.time() - os.path.getmtime(cf)) / 86400.0
+        if len(df) >= count and age_days < max_age_days:
             return df
     except FileNotFoundError:
         pass
