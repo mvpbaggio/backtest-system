@@ -27,11 +27,13 @@ def walk_forward(
     commission: float = 0.0003,
     stamp_tax: float = 0.0005,
     slippage: float = 0.0,
+    exit_mode: str = "signal",
 ) -> dict:
     """严格 n 窗样本外 WF。
 
     data: {code: DataFrame(df带date/open/high/low/close/vol)}，第一只为日期锚。
     sig:  {code: 每日信号分数数组}，与对应 df 等长。
+    exit_mode: "signal"(波段纯信号) / "trailing"(趋势止损止盈)。
     返回: {wf_total, windows(每窗收益%列表)}
     """
     anchor = data[list(data.keys())[0]]
@@ -44,7 +46,7 @@ def walk_forward(
     # 先为每只股票算一次逐日收益（确定性，结果与逐窗重算一致），避免 7 窗重复跑完整资金曲线
     precomputed = {}
     for code, df in data.items():
-        eq, _ = single_daily_rets(df, sig[code], th, tp, be, commission, stamp_tax, slippage)
+        eq, _ = single_daily_rets(df, sig[code], th, tp, be, commission, stamp_tax, slippage, exit_mode)
         tot = eq["total"].to_numpy()
         precomputed[code] = {
             "dayrets": np.diff(tot) / tot[:-1],   # 长度 = len(df)-1，对齐 df["date"][1:]

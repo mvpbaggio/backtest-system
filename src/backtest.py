@@ -65,6 +65,7 @@ def single_daily_rets(
     commission: float = DEF_COMMISSION,
     stamp_tax: float = DEF_STAMP_TAX,
     slippage: float = DEF_SLIPPAGE,
+    exit_mode: str = "signal",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """单标的逐日收益 → 资金曲线 + 交易明细。
 
@@ -72,7 +73,11 @@ def single_daily_rets(
     - equity_df: total(净值) / drawdown / drawdown_pct，供 PerformanceAnalyzer
     - trades_df: direction / pnl / rejected，供 PerformanceAnalyzer
 
-    出场逻辑=吊灯ATR(×3)+保本BE+移动止盈TP，用真实 high/low 触发，无未来函数。
+    exit_mode 区分两类引擎的出场方式：
+    - "signal"  (波段引擎)：买入靠 sig>=th，卖出唯一靠死叉信号 sig<=-th，不叠止损止盈
+    - "trailing"(趋势引擎)：买入靠 sig>=th，出场靠吊灯ATR(×3)+保本BE+移动止盈TP，
+      死叉信号也触发平仓(双保险)
+    两者都 next_open 成交、真实成本、无未来函数。
     """
     c = df["close"].to_numpy()
     h = df["high"].to_numpy()
@@ -88,35 +93,49 @@ def single_daily_rets(
     equity = [1.0]
     trades = []
     holding = False          # 是否已持仓(进入 bar i 前)
-    pending = False          # bar i-1 收盘产生信号，等今日开盘成交
+    pending_buy = False      # sig>=th 触发买入，等次日开盘买入 (next_open)
+    pending_sell = False     # 持仓时 sig<=-th 触发卖出，等次日开盘卖出 (next_open)
     entry = 0.0
     hi = 0.0
     entry_date = None
 
     for i in range(1, n):
-        # 1. 入场处理(信号于昨日收盘触发 → 今日开盘价成交 next_open)
-        if pending and not holding:
+        # 1. 买入处理(信号于昨日收盘触发 → 今日开盘价成交 next_open)
+        if pending_buy and not holding:
             entry = float(o[i])
-            # 净值：空仓现金 → 开盘买入(扣佣金) → 持有到今收。mark-to-market
-            nav *= (1 - buy_cost) * (c[i] / entry)
+            nav *= (1 - buy_cost) * (c[i] / entry)      # 开盘买入(扣佣金)持有到今收
             trades.append({"date": dates[i], "direction": "BUY",
                            "pnl": 0.0, "rejected": False, "entry_date": dates[i]})
             holding = True
             hi = float(h[i])
             entry_date = dates[i]
-            pending = False
+            pending_buy = False
             equity.append(nav)
-            continue                 # 入场 bar 收益已计，跳回避免重复
+            continue
 
-        # 2. 持仓 bar：昨收→今收 mark-to-market，或触发止损取更差成交价
+        # 2. 卖出处理(持仓时昨日产生死叉信号 → 今日开盘价卖出 next_open)
+        if pending_sell and holding:
+            exit_px = float(o[i])
+            # 净值乘数 = exit_px/c[i-1] * (1-sell_cost)，含成本；pnl 记录收益率
+            nav *= (exit_px / c[i - 1]) * (1 - sell_cost)
+            trades.append({"date": dates[i], "direction": "SELL",
+                           "pnl": exit_px / c[i - 1] - 1 - sell_cost, "rejected": False,
+                           "entry_date": entry_date})
+            holding = False; entry = 0.0; hi = 0.0
+            pending_sell = False
+            equity.append(nav)
+            continue
+
+        # 3. 持仓 bar：昨收→今收 mark-to-market，或触发止损/止盈(仅 trailing 模式)
         if holding:
             hi = max(hi, h[i])
             stop = entry - ATR_STOP_MULT * atr[i]
-            if be and hi - entry > atr[i]:
-                stop = max(stop, entry)             # 保本：盈利超1ATR后止损上移成本
-            if tp > 0:
-                stop = max(stop, hi - tp * atr[i])   # 移动止盈：距高点 tp×ATR 回落出场
-            if l[i] <= stop:
+            if exit_mode == "trailing":
+                if be and hi - entry > atr[i]:
+                    stop = max(stop, entry)           # 保本：盈利超1ATR后止损上移成本
+                if tp > 0:
+                    stop = max(stop, hi - tp * atr[i])   # 移动止盈：距高点 tp×ATR 回落出场
+            if exit_mode == "trailing" and l[i] <= stop:
                 exit_px = o[i] if o[i] < stop else stop   # 跳空低开按更差开盘价
                 ret = exit_px / c[i - 1] - 1 - sell_cost
                 nav *= (1 + ret)
@@ -125,10 +144,12 @@ def single_daily_rets(
                 holding = False; entry = 0.0; hi = 0.0
             else:
                 nav *= (1 + (c[i] / c[i - 1] - 1))
+                if sig[i] <= -th:                     # 死叉信号 → 次日开盘卖出(两种模式都认)
+                    pending_sell = True
         else:
-            # 3. 空仓：记录今日盘后信号 → 次日开盘成交
+            # 4. 空仓：记录今日盘后信号 → 次日开盘成交
             if sig[i] >= th:
-                pending = True
+                pending_buy = True
         equity.append(nav)
 
     # 期末仍持仓 → 按末日收盘平仓(持仓收益已逐日计入，只扣卖出成本)
@@ -159,11 +180,13 @@ def portfolio_performance(
     commission: float = DEF_COMMISSION,
     stamp_tax: float = DEF_STAMP_TAX,
     slippage: float = DEF_SLIPPAGE,
+    exit_mode: str = "signal",
 ) -> dict:
     """多标的等权组合绩效（用 easy-tdx PerformanceAnalyzer 出 19 项指标）。
 
     组合日收益 = 各标的日子收益等权平均（资金池流动），再累计成组合资金曲线；
     组合交易 = 各标的交易合并。喂给 PerformanceAnalyzer。
+    exit_mode: "signal"(波段纯信号) / "trailing"(趋势止损止盈)
     """
     from easy_tdx.backtest.performance import PerformanceAnalyzer
 
@@ -173,7 +196,7 @@ def portfolio_performance(
 
     for code in data:
         eq, tds = single_daily_rets(data[code], sig[code], th, tp, be,
-                                    commission, stamp_tax, slippage)
+                                    commission, stamp_tax, slippage, exit_mode)
         # 该标的日子收益（用资金曲线差分还原），按各标的自己的日期索引
         tot = eq["total"].to_numpy()
         dayrets = np.diff(tot) / tot[:-1]
