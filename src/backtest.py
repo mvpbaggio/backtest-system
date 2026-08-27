@@ -42,8 +42,11 @@ def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> np.ndarray:
     atr = np.full(n, np.nan)
     denom = np.arange(1, n + 1)
     # 冷启动段(1..period-1)：均值 = csum[i+1]/i （不足一整窗，用已有历史）
-    cold = csum[1:period] / denom[:period - 1]
-    atr[1:period] = cold if period - 1 <= n else cold[:n]
+    # 边界安全：当 n < period 时只填到可用根数，防止广播形状不匹配
+    cold_len = min(period - 1, n - 1)
+    if cold_len >= 1:
+        cold = csum[1:cold_len + 1] / denom[:cold_len]
+        atr[1:cold_len + 1] = cold
     # 正式段(period..n)：窗口 period
     if n >= period:
         hot = (csum[period:] - csum[:n - period + 1]) / period
