@@ -110,11 +110,10 @@ def evaluate_engine(
             sigmap[c] = sig
         if em == "auto":
             em = _infer_exit_mode(next(iter(sigmap.values())), th)
-        _th = 15 if name == "你的A股引擎" else th   # A股引擎原用 th15
-        m = portfolio_performance(data, sigmap, th=_th, tp=tp, be=(em == "trailing"), exit_mode=em)
-        wf = walk_forward(data, sigmap, th=_th, tp=tp, be=(em == "trailing"), exit_mode=em)
-        buy = int(sum((v >= _th).sum() for v in sigmap.values()))
-        sell = int(sum((v <= -_th).sum() for v in sigmap.values()))
+        m = portfolio_performance(data, sigmap, th=th, tp=tp, be=(em == "trailing"), exit_mode=em)
+        wf = walk_forward(data, sigmap, th=th, tp=tp, be=(em == "trailing"), exit_mode=em)
+        buy = int(sum((v >= th).sum() for v in sigmap.values()))
+        sell = int(sum((v <= -th).sum() for v in sigmap.values()))
         return {
             "name": name, "exit_mode": em, "buy": buy, "sell": sell,
             "total": m.get("total_return", 0) * 100, "annual": m.get("annual_return", 0) * 100,
@@ -125,8 +124,8 @@ def evaluate_engine(
         }
 
     t0 = time.time()
-    # 你的引擎
-    your = run_one("你的A股引擎", engine_fn, exit_mode)
+    # 被测引擎
+    your = run_one("被测引擎", engine_fn, exit_mode)
     # 三个经典对照
     refs = []
     for rn, rf in REFERENCE_ENGINES.items():
