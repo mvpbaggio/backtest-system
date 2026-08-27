@@ -80,6 +80,9 @@ def single_daily_rets(
     - "long_only"(只买不卖)：买入靠 sig>=th，**无任何主动卖出/止损**，只持有到期末平仓
       (专门用于对比'只买不卖'引擎的性能)
     三者都 next_open 成交、真实成本、无未来函数。
+
+    ⚠️ 参数说明：tp(移动止盈) 和 be(保本) 仅对 exit_mode="trailing" 生效；
+    signal / long_only 模式不使用这两个参数(传了也不影响结果)。
     """
     c = df["close"].to_numpy()
     h = df["high"].to_numpy()
@@ -194,7 +197,8 @@ def portfolio_performance(
 
     组合日收益 = 各标的日子收益等权平均（资金池流动），再累计成组合资金曲线；
     组合交易 = 各标的交易合并。喂给 PerformanceAnalyzer。
-    exit_mode: "signal"(波段纯信号) / "trailing"(趋势止损止盈)
+    exit_mode: "signal"(波段纯信号) / "trailing"(趋势止损止盈) / "long_only"(只买不卖)
+    ⚠️ tp(移动止盈) / be(保本) 仅 exit_mode="trailing" 生效，其余模式忽略。
     """
     from easy_tdx.backtest.performance import PerformanceAnalyzer
 
