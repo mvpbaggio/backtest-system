@@ -25,7 +25,7 @@
 
 - ✅ **无未来函数**：ATR 用 cumsum 纯历史滚动（修复了 `convolve(mode=same)` 偷看未来 6 天的致命 bug）
 - ✅ **双向信号**：支持「金叉买/死叉卖」（买入 `sig>=th`，卖出 `sig<=-th`），波段引擎能主动平仓
-- ✅ **`exit_mode` 出场模式**：`signal`（波段引擎纯信号出场） / `trailing`（趋势引擎吊灯ATR+BE+TP止损止盈）
+- ✅ **`exit_mode` 出场模式**：`signal`（默认，有买有卖金叉买/死叉卖）/ `long_only`（可选，只买不卖）/ `trailing`（趋势引擎吊灯ATR+BE+TP止损止盈）
 - ✅ **内置参考引擎**：`src/engines.py` 三个经典款（双均线/MACD/RSI），作为你开发新引擎的对比基准
 - ✅ **19 项绩效**：收益/年化/回撤/夏普/索提诺/卡玛/利润因子/波动率/胜率等（easy-tdx PerformanceAnalyzer）
 - ✅ **严格 7 窗样本外 WF**：看引擎在没见过的行情上的真实泛化
@@ -150,6 +150,44 @@ python -m src.run_backtest sh600000 sh601318 sh600519 sz000001 sz300750
 # 想测全市场随机大样本，用 data_source 逐只拉 + 等权组合即可
 ```
 
+### 7. 用标准接口评估引擎（推荐流程，一条龙）
+
+`evaluate_engine()` 是**测引擎的标准入口**——自动拉数据/归一化列序/对齐信号长度/选出场模式/对比 3 个经典引擎，一次跑出完整对比报告，避免手拼数据出错。
+
+```python
+from src import evaluate_engine
+
+# 你的引擎：输入 DataFrame，输出与 df 等长的 sig 数组（+50买/-50卖/0无）
+def my_engine(df):
+    close = df["close"].to_numpy()
+    ma20 = pd.Series(close).rolling(20).mean().to_numpy()
+    return np.where(close > ma20, 50, 0)
+
+# ① 默认：有买有卖（被测引擎 + 3个经典引擎都用 signal）
+result = evaluate_engine(my_engine, n_sample=300)
+
+# ② 只买不卖：被测引擎 + 3个经典引擎都用 long_only（同规则对比）
+result = evaluate_engine(my_engine, n_sample=300, exit_mode="long_only", reference_exit_mode="long_only")
+
+# ③ 看结果：你的引擎 vs 3个经典
+for r in result["reference"]:
+    print(f"{r['name']}: 收益{r['total']:+.2f}% 夏普{r['sharpe']:.2f} 7窗WF {r['wf_total']:+.2f}%")
+print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your']['sharpe']:.2f} 7窗WF {result['your']['wf_total']:+.2f}%")
+```
+
+**evaluate_engine 关键参数：**
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `engine_fn` | 你的引擎函数 | 必填 |
+| `n_sample` | 随机抽取股票数（None 则用 codes） | 100 |
+| `codes` | 固定股票池（给则用，不随机抽） | None |
+| `exit_mode` | 被测引擎出场模式：signal/trailing/long_only/auto | auto |
+| `reference_exit_mode` | 3个经典对照引擎的出场模式 | signal |
+| `th` | 信号阈值 | 25 |
+
+> `exit_mode="auto"` 会按信号特征自动判：有卖出信号→signal，只买不卖→trailing/long_only。
+
 ## 核心概念
 
 - **数据层** `src.data_source.load_kline(code)` → 自研前复权日线(open/high/low/close/vol)
@@ -157,7 +195,7 @@ python -m src.run_backtest sh600000 sh601318 sh600519 sz000001 sz300750
   - 因为 easy-tdx 的 QFQ 对不同股票降级(茅台负价)、除权方向算反(浦发)，不可靠
 - **回测核心** `src.backtest.single_daily_rets(df, sig, th, tp, be, exit_mode)` → 资金曲线 + 交易明细
   - 双向信号：买入 `sig>=th`，卖出 `sig<=-th`（金叉买/死叉卖，波段引擎能主动平仓）
-  - `exit_mode`: `signal`（波段引擎，纯信号卖出）/ `trailing`（趋势引擎，吊灯ATR+BE+TP止损止盈）
+  - `exit_mode`: `signal`（默认，有买有卖）/ `long_only`（可选，只买不卖）/ `trailing`（趋势引擎，吊灯ATR+BE+TP止损止盈）
   - 成交=**next_open**（信号次日开盘成交，无未来函数）；止损=吊灯ATR14(×3)+保本BE+移动止盈TP，真实 high/low 触发，跳空低开按更差开盘价成交
   - 成本=佣金0.03%双边 + 印花税0.05%卖出 + 滑点
   - 绩效用 **easy-tdx PerformanceAnalyzer** 出 19 项
