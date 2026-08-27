@@ -89,6 +89,12 @@ def single_daily_rets(
     buy_cost = commission
     sell_cost = commission + stamp_tax + slippage
 
+    # 健壮性：归一化 sig 到与 df 等长（短→补0无信号，长→截断），防越界崩溃
+    if len(sig) < n:
+        sig = np.pad(sig, (0, n - len(sig)), constant_values=0.0)
+    elif len(sig) > n:
+        sig = sig[:n]
+
     nav = 1.0
     equity = [1.0]
     trades = []

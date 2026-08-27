@@ -52,6 +52,20 @@ def test_full_position_matches_manual():
     assert abs(eq["total"].iloc[-1] - manual) < 1e-6, f"全仓净值不符"
 
 
+def test_sig_length_mismatch():
+    """健壮性：sig 数组比 df 短/长都不应越界崩溃（短→补0无信号，长→截断）。"""
+    df = _mkdf(30)
+    # sig 比 df 短
+    sig_short = np.zeros(20)
+    eq, tds = single_daily_rets(df, sig_short, th=25, tp=-1, be=False, exit_mode="signal")
+    assert abs(eq["total"].iloc[-1] - 1.0) < 1e-9, "sig 短应补 0（无信号→净值恒1）"
+    assert len(tds) == 0, "sig 短不应产生交易"
+    # sig 比 df 长
+    sig_long = np.zeros(40)
+    eq2, _ = single_daily_rets(df, sig_long, th=25, tp=-1, be=False, exit_mode="signal")
+    assert abs(eq2["total"].iloc[-1] - 1.0) < 1e-9, "sig 长应截断（无信号→净值恒1）"
+
+
 def test_atr_no_future():
     """ATR 第 i 天只用历史：改第 i+k 天数据不影响 atr[i]。"""
     df = _mkdf(60)
