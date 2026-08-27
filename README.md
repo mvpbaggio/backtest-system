@@ -6,7 +6,7 @@
 自研前复权消除分红除权假跳变，用验证过的高频引擎逻辑做撮合与出场，
 跑**严格 7 窗样本外 Walk-Forward**，把成本算到 A股真实费率。
 
-> ⚠️ 本项目是 **回测框架**，不含内置指标引擎。内置 demo 信号（收盘>MA20）仅用于验证链路可跑通，**不构成任何投资建议**。真实信号由你的指标引擎提供（输出每日信号分数数组喂进来即可）。
+> ⚠️ 本项目是 **回测框架**。内置 3 个**参考指标引擎**（`src/engines.py`：双均线/MACD/RSI，用于对比基准）+ 1 个 demo 信号（收盘>MA20，仅验证链路）。**不构成任何投资建议**。你的真实引擎输出「每日信号分数数组」喂进来即可。
 
 ## 为什么这样设计（真实性优先）
 
@@ -24,6 +24,9 @@
 ## 功能特性（v1.0）
 
 - ✅ **无未来函数**：ATR 用 cumsum 纯历史滚动（修复了 `convolve(mode=same)` 偷看未来 6 天的致命 bug）
+- ✅ **双向信号**：支持「金叉买/死叉卖」（买入 `sig>=th`，卖出 `sig<=-th`），波段引擎能主动平仓
+- ✅ **`exit_mode` 出场模式**：`signal`（波段引擎纯信号出场） / `trailing`（趋势引擎吊灯ATR+BE+TP止损止盈）
+- ✅ **内置参考引擎**：`src/engines.py` 三个经典款（双均线/MACD/RSI），作为你开发新引擎的对比基准
 - ✅ **19 项绩效**：收益/年化/回撤/夏普/索提诺/卡玛/利润因子/波动率/胜率等（easy-tdx PerformanceAnalyzer）
 - ✅ **严格 7 窗样本外 WF**：看引擎在没见过的行情上的真实泛化
 - ✅ **真实交易模拟**：next_open 成交、吊灯ATR14(×3)+保本BE+移动止盈TP、跳空异常价
@@ -38,7 +41,8 @@ backtest-system/
 ├── src/
 │   ├── __init__.py        # 包导出
 │   ├── data_source.py     # easy-tdx 拉取 + 自研前复权 + 本地缓存 + 自检
-│   ├── backtest.py        # 回测核心：单标的逐日收益 + 多标的组合绩效
+│   ├── backtest.py        # 回测核心：单标的逐日收益(双向信号/exit_mode) + 多标的组合绩效
+│   ├── engines.py         # 内置参考引擎：双均线/MACD/RSI（对比基准）
 │   ├── walkforward.py     # 严格 7 窗样本外 WF
 │   └── run_backtest.py    # 入口：喂信号 → 组合绩效 + 7窗WF
 ├── tests/
@@ -151,10 +155,13 @@ python -m src.run_backtest sh600000 sh601318 sh600519 sz000001 sz300750
 - **数据层** `src.data_source.load_kline(code)` → 自研前复权日线(open/high/low/close/vol)
   - 用 `NONE` 原始价 + 自研向下跳空检测前复权（阈值按板块：主板10%/双创20%/北交所30%）
   - 因为 easy-tdx 的 QFQ 对不同股票降级(茅台负价)、除权方向算反(浦发)，不可靠
-- **回测核心** `src.backtest.single_daily_rets(df, sig, th, tp, be)` → 资金曲线 + 交易明细
+- **回测核心** `src.backtest.single_daily_rets(df, sig, th, tp, be, exit_mode)` → 资金曲线 + 交易明细
+  - 双向信号：买入 `sig>=th`，卖出 `sig<=-th`（金叉买/死叉卖，波段引擎能主动平仓）
+  - `exit_mode`: `signal`（波段引擎，纯信号卖出）/ `trailing`（趋势引擎，吊灯ATR+BE+TP止损止盈）
   - 成交=**next_open**（信号次日开盘成交，无未来函数）；止损=吊灯ATR14(×3)+保本BE+移动止盈TP，真实 high/low 触发，跳空低开按更差开盘价成交
   - 成本=佣金0.03%双边 + 印花税0.05%卖出 + 滑点
   - 绩效用 **easy-tdx PerformanceAnalyzer** 出 19 项
+- **参考引擎** `src.engines`: `ma_cross` / `macd_cross` / `rsi_reversal`，三个经典波段引擎，作为你开发新引擎的对比基准
 - **样本外** `src.walkforward.walk_forward(...)` → 严格 7 窗(后70%切7段)累计收益
   - 看引擎在没见过的行情上的真实泛化，是最该看重的指标
 
