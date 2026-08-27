@@ -42,9 +42,10 @@
 backtest-system/
 ├── src/
 │   ├── __init__.py        # 包导出
-│   ├── data_source.py     # easy-tdx 拉取 + 自研前复权 + 本地缓存 + 自检
+│   ├── data_source.py     # easy-tdx 拉取 + 自研前复权 + 本地缓存(7天自动更新) + 自检
 │   ├── backtest.py        # 回测核心：单标的逐日收益(双向信号/exit_mode) + 多标的组合绩效
 │   ├── engines.py         # 内置参考引擎：双均线/MACD/RSI（对比基准）
+│   ├── benchmark.py       # 标准引擎评估接口 evaluate_engine()
 │   ├── walkforward.py     # 严格 7 窗样本外 WF
 │   └── run_backtest.py    # 入口：喂信号 → 组合绩效 + 7窗WF
 ├── tests/
@@ -82,13 +83,14 @@ python -m src.run_backtest sh600000 sh601318 sz000001
 ### 3. CLI 参数说明
 
 ```bash
-python -m src.run_backtest <codes...> [--signal demo] [--th 25] [--tp 2.5] [--be]
+python -m src.run_backtest <codes...> [--signal demo] [--th 25] [--tp 2.5] [--be] [--exit-mode signal]
 
-# codes:      股票代码，格式 sh600000 / sz000001 / bj920821（可多只）
-# --signal:   信号来源，目前只有 demo（默认）
-# --th:       信号阈值，sig>=th 才触发买入（默认 25）
-# --tp:       移动止盈，距高点 tp × ATR 回落出场（默认 2.5，设 -1 禁用）
-# --be:       保本开关，盈利超 1 ATR 后止损上移到成本价（默认开）
+# codes:       股票代码，格式 sh600000 / sz000001 / bj920821（可多只）
+# --signal:    信号来源，目前只有 demo（默认）
+# --th:        信号阈值，sig>=th 才触发买入（默认 25）
+# --tp:        移动止盈，距高点 tp × ATR 回落出场（默认 2.5，设 -1 禁用）
+# --be:        保本开关，盈利超 1 ATR 后止损上移到成本价（默认开）
+# --exit-mode: 出场模式 signal=有买有卖(默认) / long_only=只买不卖 / trailing=趋势止损止盈
 ```
 
 ### 4. 使用你自己的指标引擎（核心用法）
