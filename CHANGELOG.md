@@ -2,6 +2,19 @@
 
 记录回测系统的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v1.1] - 2026-08-27
+
+### 新增
+- **默认 500 只随机样本**：`evaluate_engine` 的 `n_sample` 默认改为 500（之前 100）
+- **缓存 7 天自动更新**：`load_kline` 加 `max_age_days=7`，缓存文件超 7 天自动重拉，数据不过期
+- **`long_only` 模式进 CLI**：`run_backtest --exit-mode` 增加 `long_only`（只买不卖）选项
+
+### 修复
+- **CLI `--exit-mode` 缺 `long_only`**：底层已支持只买不卖，但 CLI choices 只有 signal/trailing，已补全
+
+### 优化
+- **缓存过期机制**：解决数据永不过期、用旧行情测新引擎的失真问题
+
 ## [v1.0] - 2026-08-27
 
 ### 新增

@@ -77,6 +77,7 @@ if __name__ == "__main__":
     ap.add_argument("--tp", type=float, default=2.5)
     ap.add_argument("--be", dest="be", action="store_true", default=True)
     ap.add_argument("--exit-mode", dest="exit_mode", default="signal",
-                    choices=["signal", "trailing"], help="出场模式: signal=波段纯信号 / trailing=趋势止损止盈")
+                    choices=["signal", "trailing", "long_only"],
+                    help="出场模式: signal=有买有卖(默认) / trailing=趋势止损止盈 / long_only=只买不卖")
     args = ap.parse_args()
     run(args.codes, _demo_sig, args.th, args.tp, args.be, args.exit_mode)
