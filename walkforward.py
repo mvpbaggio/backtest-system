@@ -6,8 +6,8 @@
 这是实盘最看重的指标。
 
 流程：
-  - 锚定第一只股票的日期序列，取后 70%(前30%留作样本内训练不做对比)
-  - 切成 7 个样本外窗口，每窗内每只股票只统计落在该窗口的日收益
+  - 锚定第一只股票的日期序列，取后 70%(前30%留作样本内，不做对比)
+  - 切成 7 个样本外窗口，每窗内各只股票只统计落在该窗口的日收益
   - 逐窗等权组合 → 每窗收益，连乘得累计 WF 收益
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from backtest import single_daily_rets
 
 
 def walk_forward(
-    data: dict[str, dict],
+    data: dict[str, object],
     sig: dict[str, np.ndarray],
     th: float = 25,
     tp: float = 2.5,
@@ -32,10 +32,10 @@ def walk_forward(
 
     data: {code: DataFrame(df带date/open/high/low/close/vol)}，第一只为日期锚。
     sig:  {code: 每日信号分数数组}，与对应 df 等长。
-    返回: {wf_total, windows(每窗收益%列表), detail(每窗每股票收益)}
+    返回: {wf_total, windows(每窗收益%列表)}
     """
     anchor = data[list(data.keys())[0]]
-    dates = anchor["date"].to_numpy()  # 统一锚日期。
+    dates = anchor["date"].to_numpy()
     n = len(dates)
     win = int(n * 0.10)               # 后70%切7窗，每窗10%
     if win < 1:
@@ -51,11 +51,13 @@ def walk_forward(
 
         daily: dict[str, list[float]] = {}
         for code, df in data.items():
-            rs, _, _ = single_daily_rets(df, sig[code], th, tp, be, commission, stamp_tax, slippage)
+            eq, _ = single_daily_rets(df, sig[code], th, tp, be, commission, stamp_tax, slippage)
+            tot = eq["total"].to_numpy()
+            dayrets = np.diff(tot) / tot[:-1]
             dcol = df["date"].to_numpy()
-            for i, d in enumerate(dcol):
+            for i, d in enumerate(dcol[1:], start=1):
                 if d_start <= d <= d_end:
-                    daily.setdefault(d, []).append(rs[i])
+                    daily.setdefault(d, []).append(dayrets[i - 1])
         ds = sorted(daily.keys())
         if not ds:
             window_rets.append(0.0)
@@ -68,10 +70,7 @@ def walk_forward(
     tot = 1.0
     for r in window_rets:
         tot *= (1 + r / 100)
-    return {
-        "wf_total": (tot - 1) * 100,
-        "windows": [round(r, 1) for r in window_rets],
-    }
+    return {"wf_total": (tot - 1) * 100, "windows": [round(r, 1) for r in window_rets]}
 
 
 if __name__ == "__main__":
@@ -80,7 +79,6 @@ if __name__ == "__main__":
     import pandas as pd
     from data_source import load_kline, sanity_check
 
-    # 用两只股票验证 WF 框架能跑
     codes = ["sh600000", "sh601318"]
     data, sig = {}, {}
     for c in codes:
