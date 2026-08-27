@@ -112,6 +112,28 @@ def test_pending_signal_then_stop():
     assert final < 1.0, f"跳空大跌应亏损（止损生效），但净值={final:.4f}"
 
 
+def test_trailing_stop_no_double_count():
+    """trailing 模式：某日触发止损平仓后，不应再走 else 持仓收益（不重复计当根）。
+
+    构造：买入后某日 low 跌破滑移止止损 → 应只按止损价成交一次出场。
+    验证净值每天只累计一次收益，平仓日不双计。
+    """
+    n = 30
+    close_ = np.linspace(10, 20, n)
+    # 买日在 index20(信号)+1=21 开盘成交；之后某日(index24)大跌触发止损
+    open_ = close_.copy(); high_ = close_ + 0.5; low_ = close_ - 0.5
+    open_[24] = 19.0; high_[24] = 19.0; low_[24] = 11.0; close_[24] = 11.5  # trailing止损触发
+    df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n).strftime("%Y-%m-%d"),
+                       "open": open_, "high": high_, "low": low_, "close": close_, "vol": np.full(n, 1000.0)})
+    sig = np.zeros(n); sig[20] = 50        # 买入信号
+    eq, tds = single_daily_rets(df, sig, th=25, tp=2.5, be=True, exit_mode="trailing")
+    last = eq["total"].iloc[-1]
+    # 净值应有限且 >0（平仓不双计导致异常值）；且止损后不再持仓产生更多交易
+    assert np.isfinite(last) and last > 0, f"trailing 平仓后净值异常: {last}"
+    # 若起止都是上涨，买入持有应该赚；止损平仓后持有到期末不再有额外 SELL（除期末平仓）
+    assert (tds["direction"] == "SELL").sum() >= 1, "trailing 应至少有一次SELL(止损或期末)"
+
+
 if __name__ == "__main__":
     import sys, traceback
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

@@ -43,16 +43,6 @@ def walk_forward(
     if win < 1:
         raise ValueError("数据太短，无法切窗")
 
-    # 先为每只股票算一次逐日收益（确定性，结果与逐窗重算一致），避免 7 窗重复跑完整资金曲线
-    precomputed = {}
-    for code, df in data.items():
-        eq, _ = single_daily_rets(df, sig[code], th, tp, be, commission, stamp_tax, slippage, exit_mode)
-        tot = eq["total"].to_numpy()
-        precomputed[code] = {
-            "dayrets": np.diff(tot) / tot[:-1],   # 长度 = len(df)-1，对齐 df["date"][1:]
-            "dcol": df["date"].to_numpy()[1:],
-        }
-
     window_rets = []
     for w in range(n_windows):
         i0 = n - (n_windows - w) * win
@@ -61,12 +51,23 @@ def walk_forward(
             break
         d_start, d_end = dates[i0], dates[i1 - 1]
 
+        # 每窗独立回测：只取该窗 [d_start, d_end] 的 K线段，从窗口起点重新开仓。
+        # 避免「全历史入场持仓跨窗」导致两个窗口重复算同一笔钱(严格OOS)。
         daily: dict[str, list[float]] = {}
-        for code in data:
-            pc = precomputed[code]
-            for d, r in zip(pc["dcol"], pc["dayrets"]):
-                if d_start <= d <= d_end:
-                    daily.setdefault(d, []).append(r)
+        for code, df in data.items():
+            dcol = df["date"].to_numpy()
+            # 截取落在窗口内的行索引
+            idx = np.where((dcol >= d_start) & (dcol <= d_end))[0]
+            if len(idx) < 2:
+                continue
+            df_win = df.iloc[idx].reset_index(drop=True)
+            sig_win = np.asarray(sig[code])[idx]
+            eq, _ = single_daily_rets(df_win, sig_win, th, tp, be, commission, stamp_tax, slippage, exit_mode)
+            tot = eq["total"].to_numpy()
+            dayrets = np.diff(tot) / tot[:-1]
+            wd = df_win["date"].to_numpy()
+            for d, r in zip(wd[1:], dayrets):
+                daily.setdefault(d, []).append(r)
         ds = sorted(daily.keys())
         if not ds:
             window_rets.append(0.0)
