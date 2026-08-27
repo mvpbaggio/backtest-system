@@ -194,7 +194,14 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 
 ## 版本历史
 
-### v1.2（当前）
+### v1.2.1（当前）
+
+采纳外部 AI 代码审查的修复：
+- **WF 严格样本外**：`walk_forward` 每窗从窗口起点独立重新开仓回测，修复「跨窗持仓收益重复算 → WF 偏乐观」
+- **trailing 止损防重复计**：新增 `test_trailing_stop_no_double_count` 锁定
+- **tp/be 参数注明**：docstring 说明 tp/be 仅 trailing 生效，signal/long_only 忽略
+
+### v1.2
 
 新增**性能评分系统**，并精简参考引擎：
 - **性能评分** `score_engine()`：每个引擎自动出 1 个综合评分（满分100，保留3位小数），引擎越强分越高
