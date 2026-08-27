@@ -23,7 +23,12 @@ ATR_STOP_MULT = 3.0       # 吊灯止损 ATR×3
 
 
 def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> np.ndarray:
-    """ATR(真实波幅均值)。用最高/最低/前收算 TR，滚动均值。"""
+    """ATR(真实波幅均值)，严格用截至当日的历史数据，无未来函数。
+
+    原实现 np.convolve(mode="same") 是中心对齐——第 i 天会用 到 i+period/2 天
+    之后的 TR，属未来函数(决策时未来还没发生)，会导致止损/止盈点失真。
+    这里改用 cumsum 前缀滚动均值，atr[i] 只依赖 tr[0..i]，彻底消除未来暴露。
+    """
     h, l, c = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
     n = len(c)
     tr = np.zeros(n)
@@ -31,7 +36,22 @@ def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> np.ndarray:
         h[1:] - l[1:],
         np.maximum(np.abs(h[1:] - c[:-1]), np.abs(l[1:] - c[:-1])),
     )
-    atr = np.convolve(tr, np.ones(period) / period, mode="same")
+    # 向量化前缀滚动均值（替代逐日 for，477只×2500根下提速明显）
+    # atr[i] = mean(tr[i-period+1..i])，cumsum 前缀差
+    csum = np.concatenate([[0.0], np.cumsum(tr)])
+    atr = np.full(n, np.nan)
+    denom = np.arange(1, n + 1)
+    # 冷启动段(1..period-1)：均值 = csum[i+1]/i （不足一整窗，用已有历史）
+    cold = csum[1:period] / denom[:period - 1]
+    atr[1:period] = cold if period - 1 <= n else cold[:n]
+    # 正式段(period..n)：窗口 period
+    if n >= period:
+        hot = (csum[period:] - csum[:n - period + 1]) / period
+        atr[period - 1:] = hot   # 注意: atr[period-1] 才对应满窗首日
+    # 填充仍为 NaN 的首根
+    atr[0] = tr[1] if n > 1 and np.isfinite(tr[1]) else 1.0
+    # 兜底：非法值/非正
+    atr[~np.isfinite(atr)] = np.nanmean(tr[1:]) if np.isfinite(tr[1:]).any() else 1.0
     atr[atr <= 0] = 1e-9
     return atr
 
@@ -187,6 +207,46 @@ def portfolio_performance(
     # 附上标准字段别名，方便下游读取
     perf["win_rate"] = perf.get("win_rate", 0) * 100
     perf["total_trades"] = len(trades_df)
+    perf["days"] = len(ds)
+    return perf
+
+
+def buy_and_hold_benchmark(
+    data: dict[str, pd.DataFrame],
+) -> dict:
+    """买入持有基准：每个标的从区间起点死拿到终点，等权组合。
+
+    作用是判断策略引擎是否真的跑赢「死拿」——这是判断引擎有没有 alpha 的
+    金标准：如果策略连买入持有都跑不赢，那引擎本身没有价值。
+
+    返回: 等权买入持有的总收益/回撤/年化/夏普，与 portfolio_performance 对齐。
+    """
+    from easy_tdx.backtest.performance import PerformanceAnalyzer
+
+    anchor = data[list(data.keys())[0]]
+    a_start, a_end = anchor["date"].iloc[0], anchor["date"].iloc[-1]
+    daily_map: dict[str, list[float]] = {}
+    for code in data:
+        df = data[code]
+        close = df["close"].to_numpy()
+        dcol = df["date"].to_numpy()
+        # 买入持有日收益 = close 逐日变化，无信号、无交易成本（持有不动）
+        for i in range(1, len(close)):
+            d = dcol[i]
+            if a_start <= d <= a_end:
+                daily_map.setdefault(d, []).append(close[i] / close[i - 1] - 1)
+    ds = sorted(daily_map.keys())
+    if not ds:
+        return {"total_return": 0, "annual_return": 0, "max_drawdown": 0, "sharpe": 0, "days": 0}
+    comb = np.array([np.mean(daily_map[d]) for d in ds])
+    nav = np.concatenate([[1.0], np.cumprod(1 + comb)])
+    peak = np.maximum.accumulate(nav)
+    dd = nav / peak - 1
+    equity_df = pd.DataFrame({"total": nav, "drawdown": dd, "drawdown_pct": -dd})
+    trades_df = pd.DataFrame(columns=["direction", "pnl", "rejected"])
+    analyzer = PerformanceAnalyzer(equity_df, trades_df, risk_free_rate=0.03)
+    perf = analyzer.compute()
+    perf["win_rate"] = perf.get("win_rate", 0) * 100
     perf["days"] = len(ds)
     return perf
 

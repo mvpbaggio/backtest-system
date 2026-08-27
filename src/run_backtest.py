@@ -15,7 +15,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from .backtest import single_daily_rets, portfolio_performance
+from .backtest import single_daily_rets, portfolio_performance, buy_and_hold_benchmark
 from .data_source import load_kline, sanity_check
 from .walkforward import walk_forward
 
@@ -42,6 +42,14 @@ def run(codes, sig_fn, th=25, tp=2.5, be=True):
           f"最大回撤 {m['max_drawdown']*100:.2f}% | 夏普 {m['sharpe']:.2f} | "
           f"索提诺 {m.get('sortino',0):.2f} | 胜率 {m['win_rate']:.1f}% | {m['days']} 交易日")
     print(f"  利润因子 {m.get('profit_factor',0):.2f} | 波动率 {m.get('volatility',0)*100:.1f}% | 卡玛 {m.get('calmar',0):.2f}")
+
+    # 买入持有基准（判断策略是否真的跑赢死拿）
+    bh = buy_and_hold_benchmark(data)
+    alpha = (m['total_return'] - bh['total_return']) * 100
+    print(f"\n=== 买入持有基准(死拿不动) ===")
+    print(f"总收益 {bh['total_return']*100:+.2f}% | 年化 {bh['annual_return']*100:+.2f}% | "
+          f"最大回撤 {bh['max_drawdown']*100:.2f}% | 夏普 {bh['sharpe']:.2f}")
+    print(f"\n{'🔴 策略跑赢基准' if alpha > 0 else '🟢 策略跑输基准(建议直接死拿)'}：策略-基准 = {alpha:+.2f}%")
 
     # 严格 7 窗样本外 WF
     wf = walk_forward(data, sig, th, tp, be)
