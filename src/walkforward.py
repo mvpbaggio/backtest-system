@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from backtest import single_daily_rets
+from .backtest import single_daily_rets
 
 
 def walk_forward(

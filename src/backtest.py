@@ -57,6 +57,7 @@ def single_daily_rets(
     c = df["close"].to_numpy()
     h = df["high"].to_numpy()
     l = df["low"].to_numpy()
+    o = df["open"].to_numpy()
     n = len(c)
     atr = compute_atr(df)
     dates = df["date"].to_numpy()
@@ -66,37 +67,54 @@ def single_daily_rets(
     nav = 1.0
     equity = [1.0]
     trades = []
-    pos = False
+    holding = False          # 是否已持仓(进入 bar i 前)
+    pending = False          # bar i-1 收盘产生信号，等今日开盘成交
     entry = 0.0
     hi = 0.0
     entry_date = None
 
     for i in range(1, n):
-        if pos:
+        # 1. 入场处理(信号于昨日收盘触发 → 今日开盘价成交 next_open)
+        if pending and not holding:
+            entry = float(o[i])
+            # 净值：空仓现金 → 开盘买入(扣佣金) → 持有到今收。mark-to-market
+            nav *= (1 - buy_cost) * (c[i] / entry)
+            trades.append({"date": dates[i], "direction": "BUY",
+                           "pnl": 0.0, "rejected": False, "entry_date": dates[i]})
+            holding = True
+            hi = float(h[i])
+            entry_date = dates[i]
+            pending = False
+            equity.append(nav)
+            continue                 # 入场 bar 收益已计，跳回避免重复
+
+        # 2. 持仓 bar：昨收→今收 mark-to-market，或触发止损取更差成交价
+        if holding:
             hi = max(hi, h[i])
             stop = entry - ATR_STOP_MULT * atr[i]
             if be and hi - entry > atr[i]:
                 stop = max(stop, entry)             # 保本：盈利超1ATR后止损上移成本
             if tp > 0:
                 stop = max(stop, hi - tp * atr[i])   # 移动止盈：距高点 tp×ATR 回落出场
-            if l[i] <= stop:                         # 真实 low 触发出场
-                ret = stop / c[i - 1] - 1 - sell_cost
+            if l[i] <= stop:
+                exit_px = o[i] if o[i] < stop else stop   # 跳空低开按更差开盘价
+                ret = exit_px / c[i - 1] - 1 - sell_cost
                 nav *= (1 + ret)
                 trades.append({"date": dates[i], "direction": "SELL",
                                "pnl": ret, "rejected": False, "entry_date": entry_date})
-                pos = False; entry = 0.0; hi = 0.0
+                holding = False; entry = 0.0; hi = 0.0
             else:
                 nav *= (1 + (c[i] / c[i - 1] - 1))
         else:
+            # 3. 空仓：记录今日盘后信号 → 次日开盘成交
             if sig[i] >= th:
-                nav *= (1 - buy_cost)                # 建仓扣佣金
-                pos = True; entry = c[i]; hi = h[i]; entry_date = dates[i]
+                pending = True
         equity.append(nav)
 
-    # 期末仍持有 → 平仓估
-    if pos:
+    # 期末仍持仓 → 按末日收盘平仓(持仓收益已逐日计入，只扣卖出成本)
+    if holding:
+        nav *= (1 - sell_cost)
         final_ret = c[-1] / entry - 1 - sell_cost
-        nav *= (1 + final_ret)
         trades.append({"date": dates[-1], "direction": "SELL",
                        "pnl": final_ret, "rejected": False, "entry_date": entry_date})
         equity[-1] = nav
@@ -175,10 +193,8 @@ def portfolio_performance(
 
 if __name__ == "__main__":
     # 自检：收盘>MA20 信号，验证框架能产生真实交易 + 绩效可算
-    import sys
-    sys.path.insert(0, ".")
-    from data_source import load_kline, sanity_check
     import pandas as pd
+    from .data_source import load_kline, sanity_check
 
     df = load_kline("sh600000")
     sanity_check(df, "sh600000")

@@ -15,9 +15,9 @@ import sys
 import numpy as np
 import pandas as pd
 
-from backtest import single_daily_rets, portfolio_performance
-from data_source import load_kline, sanity_check
-from walkforward import walk_forward
+from .backtest import single_daily_rets, portfolio_performance
+from .data_source import load_kline, sanity_check
+from .walkforward import walk_forward
 
 
 def _demo_sig(df: pd.DataFrame) -> np.ndarray:

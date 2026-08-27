@@ -22,17 +22,21 @@
 | 单只运气 | 单标的回测 | **多标的等权组合**（资金池流动） |
 | 止损失真 | 用收盘价判断 | 用**真实 high/low** 触发吊灯ATR止损 |
 
-## 目录结构（ponytail 精简）
+## 目录结构（ponytail 精简，v1.0 改为 src 包）
 
 ```
 backtest-system/
-├── data_source.py     # easy-tdx 拉取 + 自研前复权 + 本地缓存 + 自检
-├── backtest.py        # 回测核心：单标的逐日收益 + 多标的组合绩效
-├── walkforward.py     # 严格 7 窗样本外 WF
-├── run_backtest.py    # 入口：喂信号 → 组合绩效 + 7窗WF
-├── requirements.txt   # easy-tdx, numpy, pandas
-└── cache/             # 本地K线缓存(运行时生成)
+├── src/
+│   ├── __init__.py        # 包导出
+│   ├── data_source.py     # easy-tdx 拉取 + 自研前复权 + 本地缓存 + 自检
+│   ├── backtest.py        # 回测核心：单标的逐日收益 + 多标的组合绩效
+│   ├── walkforward.py     # 严格 7 窗样本外 WF
+│   └── run_backtest.py    # 入口：喂信号 → 组合绩效 + 7窗WF
+├── requirements.txt       # easy-tdx, numpy, pandas
+└── cache/                 # 本地K线缓存(运行时生成)
 ```
+
+> 用 **src 包 + 相对导入**（`from .backtest import`），避免被同名 `backtest.py` 模块劫持。
 
 ## 快速开始
 
@@ -41,29 +45,30 @@ backtest-system/
 pip install -r requirements.txt
 
 # 2. 跑回测(默认 demo 信号 + 3只股票)
-python run_backtest.py sh600000 sh601318 sz000001
+python -m src.run_backtest sh600000 sh601318 sz000001
 
 # 3. 指定信号阈值/止盈/保本(后续接真实引擎时用)
-python run_backtest.py sh600000 --th 25 --tp 2.5 --be
+python -m src.run_backtest sh600000 --th 25 --tp 2.5 --be
 ```
 
 ## 核心概念
 
-- **数据层** `data_source.load_kline(code)` → QFQ 前复权日线(open/high/low/close/vol)
+- **数据层** `src.data_source.load_kline(code)` → 自研前复权日线(open/high/low/close/vol)
   - 用 `NONE` 原始价 + 自研向下跳空检测(>10.5%)前复权
   - 因为 easy-tdx 的 QFQ 对不同股票降级(茅台负价)、除权方向算反(浦发)，不可靠
-- **回测核心** `backtest.single_daily_rets(df, sig, th, tp, be)` → 逐日收益
-  - 出场=吊灯ATR14(×3) + 保本BE + 移动止盈TP，用真实高低点触发
+- **回测核心** `src.backtest.single_daily_rets(df, sig, th, tp, be)` → 资金曲线 + 交易明细
+  - 成交=**next_open**(信号次日开盘成交，无未来函数)；止损=吊灯ATR14(×3)+保本BE+移动止盈TP，真实 high/low 触发，跳空低开按更差开盘价成交
   - 成本=佣金0.03%双边 + 印花税0.05%卖出 + 滑点
-- **样本外** `walkforward.walk_forward(...)` → 严格 7 窗(后70%切7段)累计收益
+  - 绩效用 **easy-tdx PerformanceAnalyzer** 出 19 项(收益/年化/回撤/夏普/索提诺/卡玛/利润因子/波动率)
+- **样本外** `src.walkforward.walk_forward(...)` → 严格 7 窗(后70%切7段)累计收益
   - 看引擎在没见过的行情上的真实泛化，是最该看重的指标
 
 ## 自定义信号（接入真实引擎）
 
 ```python
 import numpy as np, pandas as pd
-from data_source import load_kline, sanity_check
-from run_backtest import run
+from src.data_source import load_kline, sanity_check
+from src.run_backtest import run
 
 # 信号函数：输入 DataFrame，输出与 df 等长的 sig 分数数组
 def my_signal(df):
