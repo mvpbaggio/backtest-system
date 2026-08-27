@@ -1,0 +1,13 @@
+# 运行时缓存
+cache/
+*.pkl
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# 系统
+.DS_Store
