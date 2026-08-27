@@ -211,46 +211,6 @@ def portfolio_performance(
     return perf
 
 
-def buy_and_hold_benchmark(
-    data: dict[str, pd.DataFrame],
-) -> dict:
-    """买入持有基准：每个标的从区间起点死拿到终点，等权组合。
-
-    作用是判断策略引擎是否真的跑赢「死拿」——这是判断引擎有没有 alpha 的
-    金标准：如果策略连买入持有都跑不赢，那引擎本身没有价值。
-
-    返回: 等权买入持有的总收益/回撤/年化/夏普，与 portfolio_performance 对齐。
-    """
-    from easy_tdx.backtest.performance import PerformanceAnalyzer
-
-    anchor = data[list(data.keys())[0]]
-    a_start, a_end = anchor["date"].iloc[0], anchor["date"].iloc[-1]
-    daily_map: dict[str, list[float]] = {}
-    for code in data:
-        df = data[code]
-        close = df["close"].to_numpy()
-        dcol = df["date"].to_numpy()
-        # 买入持有日收益 = close 逐日变化，无信号、无交易成本（持有不动）
-        for i in range(1, len(close)):
-            d = dcol[i]
-            if a_start <= d <= a_end:
-                daily_map.setdefault(d, []).append(close[i] / close[i - 1] - 1)
-    ds = sorted(daily_map.keys())
-    if not ds:
-        return {"total_return": 0, "annual_return": 0, "max_drawdown": 0, "sharpe": 0, "days": 0}
-    comb = np.array([np.mean(daily_map[d]) for d in ds])
-    nav = np.concatenate([[1.0], np.cumprod(1 + comb)])
-    peak = np.maximum.accumulate(nav)
-    dd = nav / peak - 1
-    equity_df = pd.DataFrame({"total": nav, "drawdown": dd, "drawdown_pct": -dd})
-    trades_df = pd.DataFrame(columns=["direction", "pnl", "rejected"])
-    analyzer = PerformanceAnalyzer(equity_df, trades_df, risk_free_rate=0.03)
-    perf = analyzer.compute()
-    perf["win_rate"] = perf.get("win_rate", 0) * 100
-    perf["days"] = len(ds)
-    return perf
-
-
 if __name__ == "__main__":
     # 自检：收盘>MA20 信号，验证框架能产生真实交易 + 绩效可算
     import pandas as pd
