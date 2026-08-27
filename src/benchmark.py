@@ -62,6 +62,7 @@ def evaluate_engine(
     exit_mode: str = "auto",
     seed: int = 42,
     use_kl_array: bool = False,
+    reference_exit_mode: str = "signal",
 ) -> dict:
     """用统一流程评估一个指标引擎（对比 3 个经典款）。
 
@@ -71,6 +72,8 @@ def evaluate_engine(
     exit_mode: signal / trailing / auto（auto 自动按有无卖出信号判断）
     use_kl_array: True 表示 engine_fn 吃 `[open,close,high,low,vol]` K线数组
                   （给 compute_indicators 系引擎用），False 表示吃 DataFrame
+    reference_exit_mode: 3 个经典对照引擎的出场模式（signal / trailing / long_only）。
+                         默认 signal；想跟被测引擎同模式对比（如都只买不卖）可改。
     """
     # 1. 确定股票池
     if codes is None:
@@ -126,9 +129,9 @@ def evaluate_engine(
     t0 = time.time()
     # 被测引擎
     your = run_one("被测引擎", engine_fn, exit_mode)
-    # 三个经典对照
+    # 三个经典对照（用 reference_exit_mode，可与被测引擎同模式）
     refs = []
     for rn, rf in REFERENCE_ENGINES.items():
-        refs.append(run_one(rn, rf, "signal"))
+        refs.append(run_one(rn, rf, reference_exit_mode))
 
     return {"n": len(data), "secs": time.time() - t0, "your": your, "reference": refs}
