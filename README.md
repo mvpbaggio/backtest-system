@@ -207,6 +207,31 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 - **样本外** `src.walkforward.walk_forward(...)` → 严格 7 窗(后70%切7段)累计收益
   - 看引擎在没见过的行情上的真实泛化，是最该看重的指标
 
+## 版本历史
+
+### v1.1（当前）
+
+面向「测引擎」的完整能力：
+- **标准引擎评估接口** `evaluate_engine()`：自动拉数据/归一化列序/对齐信号/选出场模式/对比3个经典引擎
+- **内置参考引擎** `src/engines.py`：双均线 `ma_cross` / MACD `macd_cross` / RSI `rsi_reversal`
+- **双向信号**：金叉买/死叉卖
+- **`exit_mode` 出场模式**：`signal`(默认有买有卖) / `long_only`(只买不卖) / `trailing`(趋势止损止盈)
+- **`reference_exit_mode`**：3个经典对照引擎可跟被测引擎同模式
+- **默认 500 只随机样本**（seed=42 可复现）
+- **缓存 7 天自动更新**（数据不过期）
+- **`long_only` 进 CLI**
+
+### v1.0（核心引擎）
+
+回测系统骨架：
+- **无未来函数**：ATR 用 cumsum 纯历史滚动；成交 next_open 次日开盘
+- **真实费率**：佣金双边 + 印花税卖出 + 滑点
+- **自研前复权数据层**：板块感知阈值（主板10%/双创20%/北交所30%），消除除权假跳变
+- **严格 7 窗样本外 WF**：看引擎真实泛化
+- **多标的等权组合**：easy-tdx PerformanceAnalyzer 出 19 项绩效
+
+> 完整变更历史见 [CHANGELOG.md](CHANGELOG.md)
+
 ## License
 
 MIT
