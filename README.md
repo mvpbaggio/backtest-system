@@ -21,21 +21,6 @@
 | 单只运气 | 单标的回测 | **多标的等权组合**（资金池流动） |
 | 止损失真 | 用收盘价判断 | 用**真实 high/low** 触发吊灯ATR止损，跳空按更差开盘价成交 |
 
-## 功能特性（v1.1）
-
-- ✅ **默认 500 只随机样本**：`evaluate_engine` 默认 500 只（可改），全市场池 seed=42 可复现
-- ✅ **缓存 7 天自动更新**：数据超 7 天自动重拉，永不过期
-- ✅ **无未来函数**：ATR 用 cumsum 纯历史滚动（修复了 `convolve(mode=same)` 偷看未来 6 天的致命 bug）
-- ✅ **双向信号**：支持「金叉买/死叉卖」（买入 `sig>=th`，卖出 `sig<=-th`），波段引擎能主动平仓
-- ✅ **`exit_mode` 出场模式**：`signal`（默认，有买有卖金叉买/死叉卖）/ `long_only`（可选，只买不卖）/ `trailing`（趋势引擎吊灯ATR+BE+TP止损止盈）
-- ✅ **内置参考引擎**：`src/engines.py` 2 个（easy-tdx MyTT MACD / 内置 MACD 金叉死叉），作为你开发新引擎的对比基准
-- ✅ **19 项绩效**：收益/年化/回撤/夏普/索提诺/卡玛/利润因子/波动率/胜率等（easy-tdx PerformanceAnalyzer）
-- ✅ **严格 7 窗样本外 WF**：看引擎在没见过的行情上的真实泛化
-- ✅ **真实交易模拟**：next_open 成交、吊灯ATR14(×3)+保本BE+移动止盈TP、跳空异常价
-- ✅ **真实 A股费率**：佣金 0.03% 双边 + 印花税 0.05% 卖出 + 滑点
-- ✅ **自研前复权数据层**：easy-tdx 拉取 + 板块感知涨停/除权阈值（主板10%/双创20%/北交所30%）+ 缓存复用
-- ✅ **回归测试**：`tests/test_backtest.py` 性质验证，防再次引入未来函数/重复计收益 bug
-
 ## 目录结构（src 包 + 相对导入）
 
 ```
@@ -167,13 +152,13 @@ def my_engine(df):
     ma20 = pd.Series(close).rolling(20).mean().to_numpy()
     return np.where(close > ma20, 50, 0)
 
-# ① 默认：有买有卖（被测引擎 + 3个经典引擎都用 signal）
+# ① 默认：有买有卖（被测引擎 + 参考引擎都用 signal）
 result = evaluate_engine(my_engine, n_sample=300)
 
-# ② 只买不卖：被测引擎 + 3个经典引擎都用 long_only（同规则对比）
+# ② 只买不卖：被测引擎 + 参考引擎都用 long_only（同规则对比）
 result = evaluate_engine(my_engine, n_sample=300, exit_mode="long_only", reference_exit_mode="long_only")
 
-# ③ 看结果：你的引擎 vs 3个经典
+# ③ 看结果：你的引擎 vs 参考引擎
 for r in result["reference"]:
     print(f"{r['name']}: 收益{r['total']:+.2f}% 夏普{r['sharpe']:.2f} 7窗WF {r['wf_total']:+.2f}%")
 print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your']['sharpe']:.2f} 7窗WF {result['your']['wf_total']:+.2f}%")
@@ -187,7 +172,7 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 | `n_sample` | 随机抽取股票数（None 则用 codes） | 100 |
 | `codes` | 固定股票池（给则用，不随机抽） | None |
 | `exit_mode` | 被测引擎出场模式：signal/trailing/long_only/auto | auto |
-| `reference_exit_mode` | 3个经典对照引擎的出场模式 | signal |
+| `reference_exit_mode` | 参考对照引擎的出场模式 | signal |
 | `th` | 信号阈值 | 25 |
 
 > `exit_mode="auto"` 会按信号特征自动判：有卖出信号→signal，只买不卖→trailing/long_only。
@@ -203,7 +188,7 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
   - 成交=**next_open**（信号次日开盘成交，无未来函数）；止损=吊灯ATR14(×3)+保本BE+移动止盈TP，真实 high/low 触发，跳空低开按更差开盘价成交
   - 成本=佣金0.03%双边 + 印花税0.05%卖出 + 滑点
   - 绩效用 **easy-tdx PerformanceAnalyzer** 出 19 项
-- **参考引擎** `src.engines`: `ma_cross` / `macd_cross` / `rsi_reversal`，三个经典波段引擎，作为你开发新引擎的对比基准
+- **参考引擎** `src.engines`: `mytt_macd`（easy-tdx MyTT MACD）/ `macd_cross`（内置 MACD），2 个参考引擎，作为你开发新引擎的对比基准（评分也以它们为标杆）
 - **样本外** `src.walkforward.walk_forward(...)` → 严格 7 窗(后70%切7段)累计收益
   - 看引擎在没见过的行情上的真实泛化，是最该看重的指标
 
