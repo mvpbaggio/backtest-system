@@ -73,11 +73,13 @@ def single_daily_rets(
     - equity_df: total(净值) / drawdown / drawdown_pct，供 PerformanceAnalyzer
     - trades_df: direction / pnl / rejected，供 PerformanceAnalyzer
 
-    exit_mode 区分两类引擎的出场方式：
-    - "signal"  (波段引擎)：买入靠 sig>=th，卖出唯一靠死叉信号 sig<=-th，不叠止损止盈
-    - "trailing"(趋势引擎)：买入靠 sig>=th，出场靠吊灯ATR(×3)+保本BE+移动止盈TP，
+    exit_mode 区分三类引擎的出场方式：
+    - "signal"   (波段引擎)：买入靠 sig>=th，卖出靠死叉信号 sig<=-th，不叠止损止盈
+    - "trailing" (趋势引擎)：买入靠 sig>=th，出场靠吊灯ATR(×3)+保本BE+移动止盈TP，
       死叉信号也触发平仓(双保险)
-    两者都 next_open 成交、真实成本、无未来函数。
+    - "long_only"(只买不卖)：买入靠 sig>=th，**无任何主动卖出/止损**，只持有到期末平仓
+      (专门用于对比'只买不卖'引擎的性能)
+    三者都 next_open 成交、真实成本、无未来函数。
     """
     c = df["close"].to_numpy()
     h = df["high"].to_numpy()
@@ -150,7 +152,7 @@ def single_daily_rets(
                 holding = False; entry = 0.0; hi = 0.0
             else:
                 nav *= (1 + (c[i] / c[i - 1] - 1))
-                if sig[i] <= -th:                     # 死叉信号 → 次日开盘卖出(两种模式都认)
+                if exit_mode != "long_only" and sig[i] <= -th:   # 死叉信号 → 次日开盘卖出(非long_only才认)
                     pending_sell = True
         else:
             # 4. 空仓：记录今日盘后信号 → 次日开盘成交
