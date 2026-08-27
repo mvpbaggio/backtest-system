@@ -77,9 +77,31 @@ def rsi_reversal(df, period: int = 14, oversold: float = 30, overbought: float =
     return sig
 
 
-# 注册表：name -> 信号函数，方便遍历对比
+def mytt_macd(df, short: int = 12, long: int = 26, signal: int = 9) -> np.ndarray:
+    """easy-tdx MyTT MACD 金叉死叉：DIF 上穿 DEA 买，下穿卖。
+    (用 easy_tdx.MyTT 原生 MACD 实现)
+    """
+    try:
+        from easy_tdx.MyTT import MACD as _macd
+    except ImportError:
+        # 无 easy-tdx 时回退到内置 ema 实现
+        return macd_cross(df, short, long, signal)
+    close = df["close"].to_numpy()
+    if len(close) < long + signal:
+        return np.zeros(len(close))
+    dif, dea, _hist = _macd(close, short, long, signal)
+    dif, dea = np.array(dif, dtype=float), np.array(dea, dtype=float)
+    sig = np.zeros(len(close))
+    for i in range(1, len(close)):
+        if dif[i] > dea[i] and dif[i - 1] <= dea[i - 1]:
+            sig[i] = 50
+        elif dif[i] < dea[i] and dif[i - 1] >= dea[i - 1]:
+            sig[i] = -50
+    return sig
+
+
+# 默认对比引擎：easy-tdx MyTT MACD + 内置 MACD 金叉死叉
 REFERENCE_ENGINES = {
-    "MA双均线": ma_cross,
+    "easy-tdx MyTT MACD": mytt_macd,
     "MACD金叉死叉": macd_cross,
-    "RSI超买超卖": rsi_reversal,
 }

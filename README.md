@@ -6,7 +6,7 @@
 自研前复权消除分红除权假跳变，用验证过的高频引擎逻辑做撮合与出场，
 跑**严格 7 窗样本外 Walk-Forward**，把成本算到 A股真实费率。
 
-> ⚠️ 本项目是 **回测框架**。内置 3 个**参考指标引擎**（`src/engines.py`：双均线/MACD/RSI，用于对比基准）+ 1 个 demo 信号（收盘>MA20，仅验证链路）。**不构成任何投资建议**。你的真实引擎输出「每日信号分数数组」喂进来即可。
+> ⚠️ 本项目是 **回测框架**。内置 2 个**参考指标引擎**（`src/engines.py`：easy-tdx MyTT MACD / 内置 MACD 金叉死叉，用于对比基准）+ 1 个 demo 信号（收盘>MA20，仅验证链路）。**不构成任何投资建议**。你的真实引擎输出「每日信号分数数组」喂进来即可。
 
 ## 为什么这样设计（真实性优先）
 
@@ -28,7 +28,7 @@
 - ✅ **无未来函数**：ATR 用 cumsum 纯历史滚动（修复了 `convolve(mode=same)` 偷看未来 6 天的致命 bug）
 - ✅ **双向信号**：支持「金叉买/死叉卖」（买入 `sig>=th`，卖出 `sig<=-th`），波段引擎能主动平仓
 - ✅ **`exit_mode` 出场模式**：`signal`（默认，有买有卖金叉买/死叉卖）/ `long_only`（可选，只买不卖）/ `trailing`（趋势引擎吊灯ATR+BE+TP止损止盈）
-- ✅ **内置参考引擎**：`src/engines.py` 三个经典款（双均线/MACD/RSI），作为你开发新引擎的对比基准
+- ✅ **内置参考引擎**：`src/engines.py` 2 个（easy-tdx MyTT MACD / 内置 MACD 金叉死叉），作为你开发新引擎的对比基准
 - ✅ **19 项绩效**：收益/年化/回撤/夏普/索提诺/卡玛/利润因子/波动率/胜率等（easy-tdx PerformanceAnalyzer）
 - ✅ **严格 7 窗样本外 WF**：看引擎在没见过的行情上的真实泛化
 - ✅ **真实交易模拟**：next_open 成交、吊灯ATR14(×3)+保本BE+移动止盈TP、跳空异常价
@@ -44,7 +44,7 @@ backtest-system/
 │   ├── __init__.py        # 包导出
 │   ├── data_source.py     # easy-tdx 拉取 + 自研前复权 + 本地缓存(7天自动更新) + 自检
 │   ├── backtest.py        # 回测核心：单标的逐日收益(双向信号/exit_mode) + 多标的组合绩效
-│   ├── engines.py         # 内置参考引擎：双均线/MACD/RSI（对比基准）
+│   ├── engines.py         # 内置参考引擎：easy-tdx MyTT MACD / 内置 MACD（对比基准）
 │   ├── benchmark.py       # 标准引擎评估接口 evaluate_engine()
 │   ├── walkforward.py     # 严格 7 窗样本外 WF
 │   └── run_backtest.py    # 入口：喂信号 → 组合绩效 + 7窗WF
@@ -209,14 +209,23 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 
 ## 版本历史
 
-### v1.1（当前）
+### v1.2（当前）
+
+新增**性能评分系统**，并精简参考引擎：
+- **性能评分** `score_engine()`：每个引擎自动出 1 个综合评分（满分100，保留3位小数），引擎越强分越高
+  - 相对最强参考引擎做基准（看最强）
+  - 权重（赚钱为主）：收益 50% + 夏普 15% + 回撤 10% + 索提诺 5% + 样本外WF 20%
+- **参考引擎精简为 2 个**：easy-tdx MyTT MACD + 内置 MACD 金叉死叉（去掉双均线/RSI）
+- **新增参考引擎** `mytt_macd`（easy-tdx MyTT 原生 MACD）
+
+### v1.1
 
 面向「测引擎」的完整能力：
-- **标准引擎评估接口** `evaluate_engine()`：自动拉数据/归一化列序/对齐信号/选出场模式/对比3个经典引擎
-- **内置参考引擎** `src/engines.py`：双均线 `ma_cross` / MACD `macd_cross` / RSI `rsi_reversal`
+- **标准引擎评估接口** `evaluate_engine()`：自动拉数据/归一化列序/对齐信号/选出场模式/对比参考引擎
+- **内置参考引擎** `src/engines.py`：双均线 / MACD / RSI（v1.2 起精简为 MyTT MACD + MACD）
 - **双向信号**：金叉买/死叉卖
 - **`exit_mode` 出场模式**：`signal`(默认有买有卖) / `long_only`(只买不卖) / `trailing`(趋势止损止盈)
-- **`reference_exit_mode`**：3个经典对照引擎可跟被测引擎同模式
+- **`reference_exit_mode`**：参考对照引擎可跟被测引擎同模式
 - **默认 500 只随机样本**（seed=42 可复现）
 - **缓存 7 天自动更新**（数据不过期）
 - **`long_only` 进 CLI**

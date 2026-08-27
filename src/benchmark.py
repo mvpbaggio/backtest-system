@@ -7,12 +7,12 @@
    传给 `compute_indicators` 类引擎用；按列名取 `df["close"]` 的引擎直接用 DataFrame。
 2. **信号归一化**：自动对齐 sig 与 df 等长（短补0/长截断）。
 3. **出场模式自动选择**：`signal`=波段纯信号 / `trailing`=趋势止损止盈。
-4. **集成 3 个经典引擎**做对照（双均线/MACD/RSI），一次评估引擎 vs 经典的强弱。
+4. **集成参考引擎**做对照（easy-tdx MyTT MACD + 内置 MACD），一次评估引擎 vs 参考的强弱。
 
 典型用法：
 ```python
 from src.benchmark import evaluate_engine
-from src.benchmark import REFERENCE_ENGINES  # 3个经典
+from src.benchmark import REFERENCE_ENGINES  # 2个: easy-tdx MyTT MACD + 内置MACD
 result = evaluate_engine(my_engine, codes=["sh600000","sh601318"], n_sample=None,
                          exit_mode="auto")  # exit_mode=auto: 按引擎信号有无卖出信号自动判
 ```
@@ -29,7 +29,7 @@ import pandas as pd
 from .backtest import portfolio_performance
 from .data_source import load_kline, sanity_check
 from .walkforward import walk_forward
-from .engines import ma_cross, macd_cross, rsi_reversal, REFERENCE_ENGINES
+from .engines import ma_cross, macd_cross, rsi_reversal, mytt_macd, REFERENCE_ENGINES
 
 # A股引擎(compute_indicators 系)期望的 K线列序
 KL_COLUMNS = ["open", "close", "high", "low", "vol"]
@@ -50,6 +50,26 @@ def _infer_exit_mode(sig: np.ndarray, th: float) -> str:
     if (sig <= -th).any():
         return "signal"
     return "trailing"
+
+
+def score_engine(e: dict, best: dict) -> float:
+    """相对最强参考引擎打分（方案A：参考引擎固定成标杆，被测引擎可超 100 分）。
+
+    e: 单引擎绩效 dict(total/annual/mdd/sharpe/sortino/calmar/win_rate/wf_total)
+    best: 参考引擎最佳值(total/sharpe/sortino/wf/mdd 取最强者) —— 固定标杆
+    权重(赚钱为主): 收益50 / 夏普15 / 回撤10 / 索提诺5 / 样本外WF20。
+    上限120%防压扁参考，下限0。被测引擎某指标超参考标杆 → 该子项可 >满分，
+    总分可超 100（直接体现“比参考强多少”）。返回3位小数。
+    """
+    def _cap(x: float) -> float:
+        return max(0.0, min(1.2, x))
+
+    total_ = 50 * _cap(e["total"] / best["total"]) if best["total"] else 0
+    sharpe_ = 15 * _cap(e["sharpe"] / best["sharpe"]) if best["sharpe"] else 0
+    mdd_ = 10 * _cap(best["mdd"] / e["mdd"]) if (e["mdd"] and best["mdd"]) else 0
+    sortino_ = 5 * _cap(e["sortino"] / best["sortino"]) if best["sortino"] else 0
+    wf_ = 20 * _cap(max(0.0, e["wf_total"]) / best["wf"]) if best["wf"] else 0
+    return round(total_ + sharpe_ + mdd_ + sortino_ + wf_, 3)
 
 
 def evaluate_engine(
@@ -129,9 +149,18 @@ def evaluate_engine(
     t0 = time.time()
     # 被测引擎
     your = run_one("被测引擎", engine_fn, exit_mode)
-    # 三个经典对照（用 reference_exit_mode，可与被测引擎同模式）
+    # 参考引擎对照（用 reference_exit_mode，可与被测引擎同模式）
     refs = []
     for rn, rf in REFERENCE_ENGINES.items():
         refs.append(run_one(rn, rf, reference_exit_mode))
+
+    # 对被测引擎 + 所有参考引擎算相对基准评分(看最强)
+    all_eng = [your] + refs
+    # 参考引擎里的最佳值(做满分基准)
+    best = {"total": max(e["total"] for e in refs), "sharpe": max(e["sharpe"] for e in refs),
+            "sortino": max(e["sortino"] for e in refs), "wf": max(e["wf_total"] for e in refs),
+            "mdd": min(e["mdd"] for e in refs)}
+    for e in all_eng:
+        e["score"] = score_engine(e, best)
 
     return {"n": len(data), "secs": time.time() - t0, "your": your, "reference": refs}

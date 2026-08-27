@@ -2,6 +2,22 @@
 
 记录回测系统的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v1.2] - 2026-08-27
+
+### 新增
+- **性能评分系统** `score_engine()`：每个引擎自动出 1 个综合评分（满分100，保留3位小数，引擎越强分越高）
+  - 相对最强参考引擎做基准（看最强，超哥需求）
+  - 权重（赚钱为主）：收益 50% + 夏普 15% + 回撤 10% + 索提诺 5% + 样本外WF 20%
+  - 上限 120% 防压扁参考引擎，`evaluate_engine` 每个引擎带 `score`
+
+### 变更
+- **参考引擎精简为 2 个**：easy-tdx MyTT MACD + 内置 MACD 金叉死叉（原 3 个：双均线/MACD/RSI，去掉双均线和 RSI）
+- **新增参考引擎** `mytt_macd`：easy-tdx MyTT 原生 MACD 实现（无 easy-tdx 时回退内置）
+
+### 修复
+- **`src/__init__.py` 缺 `mytt_macd` 导出**：`from src import mytt_macd` 会 ImportError，已补全
+- **基准引擎变更同步**：README/benchmark 文档描述 3 个经典→2 个参考引擎
+
 ## [v1.1] - 2026-08-27
 
 ### 新增
