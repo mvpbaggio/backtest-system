@@ -4,7 +4,7 @@
 
 ## [v1.2.1] - 2026-08-27
 
-### 修复（采纳外部 AI 代码审查）
+### 修复（代码审查）
 - **WF 严格样本外（重要）**：`walk_forward` 改为每窗从窗口起点独立重新开仓回测，不再对整个区间跑一次资金曲线再切窗。修复「一笔跨窗持仓收益两个窗口都算 → WF 偏乐观」的方法论硬伤。
 - **trailing 止损平仓防重复计**：新增 `test_trailing_stop_no_double_count`，锁定某日触发止损平仓后不重复走 else 持仓收益，防将来改挂。
 - **tp/be 参数注明**：`single_daily_rets` / `portfolio_performance` 的 docstring 注明 tp(移动止盈)/be(保本) 仅 `exit_mode="trailing"` 生效，signal / long_only 忽略，防参数名误导。
