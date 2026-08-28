@@ -51,6 +51,8 @@ backtest-system/
 pip install -r requirements.txt
 ```
 
+> ⚠️ **easy-tdx 是核心必装依赖**（拉取行情数据、绩效报表、内置 MyTT 引擎都用它）。`requirements.txt` 已内置 `easy-tdx>=1.20`，`pip install` 会一并装上；装完确认 `easy-tdx` 命令在 PATH（`evaluate_engine` 默认 500 只随机抽样依赖它拉股票池）。
+
 ### 1. 跑回归测试（确认框架基线正常）
 
 ```bash
@@ -141,22 +143,27 @@ python -m src.run_backtest sh600000 sh601318 sh600519 sz000001 sz300750
 
 ### 7. 用标准接口评估引擎（推荐流程，一条龙）
 
-`evaluate_engine()` 是**测引擎的标准入口**——自动拉数据/归一化列序/对齐信号长度/选出场模式/对比 3 个经典引擎，一次跑出完整对比报告，避免手拼数据出错。
+`evaluate_engine()` 是**测引擎的标准入口**——自动拉数据/归一化列序/对齐信号长度/选出场模式/对比参考引擎，一次跑出完整对比报告。**v1.3 起接口全兼容**：引擎吃 DataFrame 或 (n,5) K线数组都行（自动识别），无需 `use_kl_array` 开关。
 
 ```python
 from src import evaluate_engine
 
-# 你的引擎：输入 DataFrame，输出与 df 等长的 sig 数组（+50买/-50卖/0无）
-def my_engine(df):
+# 你的引擎：输入 DataFrame 或 (n,5) K线数组，输出与 df 等长的 sig 数组（+50买/-50卖/0无）
+def my_engine_df(df):          # DataFrame 派
     close = df["close"].to_numpy()
     ma20 = pd.Series(close).rolling(20).mean().to_numpy()
     return np.where(close > ma20, 50, 0)
 
-# ① 默认：有买有卖（被测引擎 + 参考引擎都用 signal）
-result = evaluate_engine(my_engine, n_sample=300)
+def my_engine_array(kl):       # 数组派（列序 KL_COLUMNS: open,high,low,close,vol）
+    close = kl[:, 3]           # close 在第 4 位（index 3）
+    ma20 = np.convolve(close, np.ones(20)/20, mode="same")
+    return np.where(close > ma20, 50, 0)
+
+# ① 默认：有买有卖（被测引擎 + 参考引擎都用 signal）—— 数组/DataFrame派都能直接接
+result = evaluate_engine(my_engine_array, n_sample=300)
 
 # ② 只买不卖：被测引擎 + 参考引擎都用 long_only（同规则对比）
-result = evaluate_engine(my_engine, n_sample=300, exit_mode="long_only", reference_exit_mode="long_only")
+result = evaluate_engine(my_engine_df, n_sample=300, exit_mode="long_only", reference_exit_mode="long_only")
 
 # ③ 看结果：你的引擎 vs 参考引擎
 for r in result["reference"]:
@@ -168,14 +175,15 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 
 | 参数 | 说明 | 默认 |
 |------|------|------|
-| `engine_fn` | 你的引擎函数 | 必填 |
-| `n_sample` | 随机抽取股票数（None 则用 codes） | 100 |
+| `engine_fn` | 你的引擎函数（吃 DataFrame 或 K线数组，自动识别） | 必填 |
+| `n_sample` | 随机抽取股票数（None 则用 codes） | 500 |
 | `codes` | 固定股票池（给则用，不随机抽） | None |
 | `exit_mode` | 被测引擎出场模式：signal/trailing/long_only/auto | auto |
 | `reference_exit_mode` | 参考对照引擎的出场模式 | signal |
 | `th` | 信号阈值 | 25 |
 
 > `exit_mode="auto"` 会按信号特征自动判：有卖出信号→signal，只买不卖→trailing/long_only。
+> 数组派引擎的 K线列序固定为 `KL_COLUMNS = [open, high, low, close, vol]`，可用 `from src import KL_COLUMNS` 引用避免硬编码。
 
 ## 核心概念
 
@@ -194,7 +202,16 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 
 ## 版本历史
 
-### v1.2.1（当前）
+### v1.3（当前）
+
+**全兼容引擎接口**：`evaluate_engine` 移除 `use_kl_array` 全局开关，改为协议层 `src/engine_api.py` 自动适配引擎输入（DataFrame 派 / 数组派 / 带参派）。
+
+- **新增 `src/engine_api.py`**：`KL_COLUMNS`（列序单一真源）、`normalize_kl()`、`detect_input()`、`call_engine()`、`align_sig()`，统一引擎接入约定
+- **列序统一**为 `[open, high, low, close, vol]`，杜绝喂数组错位（曾误测全亏）
+- **参考引擎数组/DataFrame 通吃**（`_close` helper），不再因 `use_kl_array` 崩溃
+- **验证**：5 引擎默认 500 只全兼容跑通（BIG-A-POWER +540.88%/118.09、内置MACD +288.75%/100、talib +105.15%、pandas_ta +103.96%、ta 双均线 +63.31%）；回归测试 7/7、兼容测试 4/4
+
+### v1.2.1
 
 代码审查的修复：
 - **WF 严格样本外**：`walk_forward` 每窗从窗口起点独立重新开仓回测，修复「跨窗持仓收益重复算 → WF 偏乐观」

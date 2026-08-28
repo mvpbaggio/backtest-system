@@ -2,6 +2,32 @@
 
 记录回测系统的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v1.3] - 2026-08-28
+
+### 新增：全兼容引擎接口
+- **引擎协议层 `src/engine_api.py`**：统一引擎接入约定，自动适配三种输入风格——DataFrame 派（`fn(df)`）、numpy 数组派（`fn(kl)`，列序=KL_COLUMNS）、带参派。`evaluate_engine` 不再需要 `use_kl_array` 开关。
+- **`KL_COLUMNS` 单一真源常量**：`["open","high","low","close","vol"]`，DataFrame 与数组统一此列序，杜绝列序错位（曾把 K线列序喂错导致 A股引擎误测全亏）。
+- **`detect_input` 自动探测引擎输入类型**：先试 ndarray 再试 DataFrame，数组派/DataFrame派引擎无需声明即可接入。
+- **`call_engine` / `normalize_kl` / `align_sig`**：统一引擎调用与信号对齐，供评估器使用。
+- **参考引擎数组/DataFrame 通吃**：内置 `mytt_macd` / `macd_cross` 等加 `_close` helper，输入自动兼容，`use_kl_array` 下不再崩。
+
+### 修复
+- **移除 `use_kl_array` 全局开关**：原接口靠一个全局开关生硬切换引擎输入类型，且 `use_kl_array=True` 时参考引擎（吃 DataFrame）崩溃。v1.3 改为协议层自动适配，彻底移除该开关。
+- **`evaluate_engine` 默认抽样硬编码路径**：股票池拉取写死 `/home/node/.openclaw/...` 改 `shutil.which("easy-tdx")` 探测（v1.2.1 已修，v1.3 保留）。
+- **`compute_atr` 短数据越界**：加 `n<2` guard（v1.2.1 已修，v1.3 保留）。
+- **CLI `--be` 参数失效**：改 `--no-be`（v1.2.1 已修，v1.3 保留）。
+
+### 验证
+- 新增 `tests/test_engine_compat.py`：4 个兼容测试全过（detect_input 类型识别、数组/DataFrame等价、evaluate_engine 双类型跑通、第三方库引擎）。
+- 回归测试 7/7 通过。
+- **5 引擎默认 500 只全兼容验证**（seed=42，通过 487~488 只）：
+  - BIG-A-POWER（数组派）：+540.88%，夏普 0.92，回撤 31.08%，7窗WF +89.43%，评分 118.09
+  - 内置MACD金叉死叉（DataFrame派）：+288.75%，夏普 0.63，回撤 31.35%，7窗WF +36.14%，评分 100.00
+  - TA-Lib MACD（数组派）：+105.15%，夏普 0.31，回撤 26.76%，7窗WF +31.31%，评分 57.27
+  - pandas_ta RSI（DataFrame派）：+103.96%，夏普 0.31，回撤 32.95%，7窗WF +64.74%，评分 61.21
+  - ta 双均线（DataFrame派）：+63.31%，夏普 0.16，回撤 37.35%，7窗WF +25.53%，评分 38.90
+- BIG-A-POWER 结果与 README 报告一致（+538.2%/118.99 声称 vs +540.88%/118.09 实测），证明接口重构未改坏引擎成绩。
+
 ## [v1.2.1] - 2026-08-27
 
 ### 修复（代码审查）
