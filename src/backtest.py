@@ -31,6 +31,9 @@ def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> np.ndarray:
     """
     h, l, c = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
     n = len(c)
+    # ponytail: n<2 无历史可算 ATR，返回全 1 安全值（防 n=0/1 越界崩）
+    if n < 2:
+        return np.ones(n)
     tr = np.zeros(n)
     tr[1:] = np.maximum(
         h[1:] - l[1:],

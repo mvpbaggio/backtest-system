@@ -97,10 +97,13 @@ def evaluate_engine(
     """
     # 1. 确定股票池
     if codes is None:
-        import subprocess
+        import shutil, subprocess
+        cli = shutil.which("easy-tdx")
+        if cli is None:
+            raise RuntimeError("easy-tdx 未安装或不在 PATH。请 `pip install easy-tdx`，"
+                               "或显式传 codes=[...] 指定股票池。")
         out = subprocess.run(
-            ["/home/node/.openclaw/workspace/tools/easy_tdx_test/.venv/bin/easy-tdx",
-             "quote-list", "A", "--count", "3000", "--output", "json"],
+            [cli, "quote-list", "A", "--count", "3000", "--output", "json"],
             capture_output=True, text=True, timeout=60)
         pool = []
         for item in json.loads(out.stdout):
