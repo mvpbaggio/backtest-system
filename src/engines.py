@@ -14,6 +14,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .engine_api import KL_COLUMNS
+
+
+def _close(x) -> np.ndarray:
+    """取 close 列：DataFrame 按列名，numpy 数组按 KL_COLUMNS 列序(index 3)。"""
+    if isinstance(x, pd.DataFrame):
+        return x["close"].to_numpy()
+    return np.asarray(x, dtype=float)[:, KL_COLUMNS.index("close")]
+
 
 def sma(x, p):
     return pd.Series(x).rolling(p).mean().to_numpy()
@@ -25,7 +34,7 @@ def ema(x, p):
 
 def ma_cross(df, fast: int = 5, slow: int = 20) -> np.ndarray:
     """双均线金叉死叉：短均线上穿长均线买(金叉)，下穿卖(死叉)。默认 MA5/MA20。"""
-    close = df["close"].to_numpy()
+    close = _close(df)
     maf, mas = sma(close, fast), sma(close, slow)
     sig = np.zeros(len(close))
     for i in range(1, len(close)):
@@ -38,7 +47,7 @@ def ma_cross(df, fast: int = 5, slow: int = 20) -> np.ndarray:
 
 def macd_cross(df, short: int = 12, long: int = 26, signal: int = 9) -> np.ndarray:
     """MACD 金叉死叉：DIF 上穿 DEA 买(金叉)，下穿卖(死叉)。"""
-    close = df["close"].to_numpy()
+    close = _close(df)
     if len(close) < long + signal:
         return np.zeros(len(close))
     efast, eslow = ema(close, short), ema(close, long)
@@ -55,7 +64,7 @@ def macd_cross(df, short: int = 12, long: int = 26, signal: int = 9) -> np.ndarr
 
 def rsi_reversal(df, period: int = 14, oversold: float = 30, overbought: float = 70) -> np.ndarray:
     """RSI 超买超卖：超卖回升买(<30 后拐头)，超买回落卖(>70 后拐头)。"""
-    close = df["close"].to_numpy()
+    close = _close(df)
     n = len(close)
     if n < period + 2:
         return np.zeros(n)
@@ -86,7 +95,7 @@ def mytt_macd(df, short: int = 12, long: int = 26, signal: int = 9) -> np.ndarra
     except ImportError:
         # 无 easy-tdx 时回退到内置 ema 实现
         return macd_cross(df, short, long, signal)
-    close = df["close"].to_numpy()
+    close = _close(df)
     if len(close) < long + signal:
         return np.zeros(len(close))
     dif, dea, _hist = _macd(close, short, long, signal)

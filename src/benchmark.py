@@ -30,19 +30,7 @@ from .backtest import portfolio_performance
 from .data_source import load_kline, sanity_check
 from .walkforward import walk_forward
 from .engines import ma_cross, macd_cross, rsi_reversal, mytt_macd, REFERENCE_ENGINES
-
-# A股引擎(compute_indicators 系)期望的 K线列序
-KL_COLUMNS = ["open", "close", "high", "low", "vol"]
-
-
-def _align_sig(sig: np.ndarray, n: int) -> np.ndarray:
-    """把 sig 归一化到长度 n：短→补0(无信号)，长→截断。防越界。"""
-    sig = np.asarray(sig, dtype=float)
-    if len(sig) < n:
-        return np.pad(sig, (0, n - len(sig)), constant_values=0.0)
-    if len(sig) > n:
-        return sig[:n]
-    return sig
+from .engine_api import KL_COLUMNS, call_engine, align_sig as _align_sig
 
 
 def _infer_exit_mode(sig: np.ndarray, th: float) -> str:
@@ -81,18 +69,15 @@ def evaluate_engine(
     be: bool = True,
     exit_mode: str = "auto",
     seed: int = 42,
-    use_kl_array: bool = False,
     reference_exit_mode: str = "signal",
 ) -> dict:
-    """用统一流程评估一个指标引擎（对比 3 个经典款）。
+    """用统一流程评估一个指标引擎（对比参考引擎）。
 
-    engine_fn: 输入 DataFrame（或 K线数组，若 use_kl_array=True），输出 sig 数组
+    engine_fn: 输入 DataFrame 或 (n,5) K线数组，自动适配；输出 sig 数组
     codes: 指定股票池（None 则从 easy-tdx 随机抽 n_sample 只）
     th: 阈值，sig>=th 买入 / sig<=-th 卖出
     exit_mode: signal / trailing / auto（auto 自动按有无卖出信号判断）
-    use_kl_array: True 表示 engine_fn 吃 `[open,close,high,low,vol]` K线数组
-                  （给 compute_indicators 系引擎用），False 表示吃 DataFrame
-    reference_exit_mode: 3 个经典对照引擎的出场模式（signal / trailing / long_only）。
+    reference_exit_mode: 参考对照引擎的出场模式（signal / trailing / long_only）。
                          默认 signal；想跟被测引擎同模式对比（如都只买不卖）可改。
     """
     # 1. 确定股票池
@@ -128,11 +113,8 @@ def evaluate_engine(
     def run_one(name, fn, em):
         sigmap = {}
         for c, df in data.items():
-            if use_kl_array:
-                kl = df[KL_COLUMNS].to_numpy()
-                sig = _align_sig(fn(kl), len(df))
-            else:
-                sig = _align_sig(fn(df), len(df))
+            # call_engine 自动适配：DataFrame派直接喂 df，数组派喂 df[KL_COLUMNS]
+            sig = _align_sig(call_engine(fn, df), len(df))
             sigmap[c] = sig
         if em == "auto":
             em = _infer_exit_mode(next(iter(sigmap.values())), th)
