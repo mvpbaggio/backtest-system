@@ -56,47 +56,62 @@ def df_engine(df):
     return np.where(c > ma20, 50, 0)
 
 
-def talib_engine(kl):
-    """数组派（第三方库）：吃 numpy 数组，用 talib.MACD。"""
-    import talib
-    close = kl[:, KL_COLUMNS.index("close")]
-    dif, dea, _ = talib.MACD(close)
-    sig = np.zeros(len(close))
-    for i in range(1, len(close)):
-        if dif[i] > dea[i] and dif[i - 1] <= dea[i - 1]:
-            sig[i] = 50
-        elif dif[i] < dea[i] and dif[i - 1] >= dea[i - 1]:
-            sig[i] = -50
-    return sig
+# ---- 第三方库兼容性（可选）：本地装了 ta/pandas-ta/TA-Lib 才测，没装跳过 ----
+def _libs_available() -> bool:
+    """检测 ta / pandas_ta / talib 是否本地可用（可选依赖，非交付必需）。"""
+    try:
+        import ta, pandas_ta, talib  # noqa
+        return True
+    except ImportError:
+        return False
 
 
-def ta_engine(df):
-    """DataFrame派（第三方库）：吃 pandas Series/DataFrame，用 ta 库双均线。"""
-    import ta
-    c = df["close"]
-    fast = ta.trend.sma_indicator(c, 5)
-    slow = ta.trend.sma_indicator(c, 20)
-    sig = np.zeros(len(c))
-    for i in range(1, len(c)):
-        if fast[i] > slow[i] and fast[i - 1] <= slow[i - 1]:
-            sig[i] = 50
-        elif fast[i] < slow[i] and fast[i - 1] >= slow[i - 1]:
-            sig[i] = -50
-    return sig
+_HAS_LIBS = _libs_available()
 
 
-def pandas_ta_engine(df):
-    """DataFrame派（第三方库）：吃 pandas Series，用 pandas_ta RSI 超买超卖。"""
-    import pandas_ta as pta
-    c = df["close"]
-    r = pta.rsi(c, length=14)
-    sig = np.zeros(len(c))
-    for i in range(1, len(c)):
-        if r[i] < 30 and r[i - 1] >= 30:
-            sig[i] = 50
-        elif r[i] > 70 and r[i - 1] <= 70:
-            sig[i] = -50
-    return sig
+def _make_lib_engines():
+    """构造引用第三方库的引擎（仅当一个都不缺时可用）。"""
+    def talib_engine(kl):
+        """数组派：talib.MACD，吃 numpy 数组。"""
+        import talib
+        close = kl[:, KL_COLUMNS.index("close")]
+        dif, dea, _ = talib.MACD(close)
+        sig = np.zeros(len(close))
+        for i in range(1, len(close)):
+            if dif[i] > dea[i] and dif[i - 1] <= dea[i - 1]:
+                sig[i] = 50
+            elif dif[i] < dea[i] and dif[i - 1] >= dea[i - 1]:
+                sig[i] = -50
+        return sig
+
+    def ta_engine(df):
+        """DataFrame派：ta 库双均线，吃 pandas Series/DataFrame。"""
+        import ta
+        c = df["close"]
+        fast = ta.trend.sma_indicator(c, 5)
+        slow = ta.trend.sma_indicator(c, 20)
+        sig = np.zeros(len(c))
+        for i in range(1, len(c)):
+            if fast[i] > slow[i] and fast[i - 1] <= slow[i - 1]:
+                sig[i] = 50
+            elif fast[i] < slow[i] and fast[i - 1] >= slow[i - 1]:
+                sig[i] = -50
+        return sig
+
+    def pandas_ta_engine(df):
+        """DataFrame派：pandas_ta RSI 超买超卖，吃 pandas Series。"""
+        import pandas_ta as pta
+        c = df["close"]
+        r = pta.rsi(c, length=14)
+        sig = np.zeros(len(c))
+        for i in range(1, len(c)):
+            if r[i] < 30 and r[i - 1] >= 30:
+                sig[i] = 50
+            elif r[i] > 70 and r[i - 1] <= 70:
+                sig[i] = -50
+        return sig
+
+    return talib_engine, ta_engine, pandas_ta_engine
 
 
 # ---- 测试1：detect_input 准确识别输入类型 ----
@@ -104,13 +119,18 @@ def test_detect_input_types():
     cases = {
         "array_engine": (array_engine, "array"),
         "df_engine": (df_engine, "df"),
-        "talib_engine": (talib_engine, "array"),
-        "ta_engine": (ta_engine, "df"),   # ta 库吃 Series/DataFrame，应判 df
-        "pandas_ta_engine": (pandas_ta_engine, "df"),
         # 参考引擎已兼容数组/DF（_close helper），detect 先试数组判 array 合理
         "内置mytt_macd": (mytt_macd, "array"),
         "内置macd_cross": (macd_cross, "array"),
     }
+    if _HAS_LIBS:
+        # 第三方库引擎已装：验证 detect_input 对 talib(数组派)/ta,pandas_ta(DataFrame派)的识别
+        t_eng, ta_eng, pta_eng = _make_lib_engines()
+        cases.update({
+            "talib_engine": (t_eng, "array"),
+            "ta_engine": (ta_eng, "df"),
+            "pandas_ta_engine": (pta_eng, "df"),
+        })
     for name, (fn, expect) in cases.items():
         got = detect_input(fn)
         assert got == expect, f"{name}: detect_input={got}，期望 {expect}"
@@ -137,18 +157,17 @@ def test_evaluate_engine_both_types():
         assert np.isfinite(r["your"]["score"]), f"{name}: 评分非有限值"
 
 
-# ---- 测试4：第三方库引擎（talib 数组派 / ta / pandas_ta DataFrame派）全可跑 ----
+# ---- 测试4：第三方库引擎（talib 数组派 / ta / pandas_ta DataFrame派）全可跑（可选） ----
 def test_third_party_engines_run():
+    if not _HAS_LIBS:
+        print("  ⚠️ 第三方库(ta/pandas-ta/TA-Lib)未装，跳过第三方引擎测试")
+        return
     kl = _mk_kl()
-    # 各引擎在 call_engine 下不崩、输出与K线等长
-    for name, fn in [("talib", talib_engine), ("ta", ta_engine),
-                     ("pandas_ta", pandas_ta_engine)]:
-        try:
-            sig = call_engine(fn, kl)
-            assert len(sig) == len(kl), f"{name}: 信号长度 {len(sig)} != {len(kl)}"
-            print(f"  ✅ {name} 引擎跑通")
-        except ImportError as e:
-            print(f"  ⚠️ {name} 库未装，跳过: {e}")
+    t_eng, ta_eng, pta_eng = _make_lib_engines()
+    for name, fn in [("talib", t_eng), ("ta", ta_eng), ("pandas_ta", pta_eng)]:
+        sig = call_engine(fn, kl)
+        assert len(sig) == len(kl), f"{name}: 信号长度 {len(sig)} != {len(kl)}"
+        print(f"  ✅ {name} 引擎跑通")
 
 
 if __name__ == "__main__":
