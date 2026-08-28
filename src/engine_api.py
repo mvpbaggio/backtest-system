@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 import numpy as np
 import pandas as pd
 
@@ -38,12 +40,16 @@ def normalize_kl(df: pd.DataFrame) -> np.ndarray:
     return df[KL_COLUMNS].to_numpy()
 
 
+@lru_cache(maxsize=None)
 def detect_input(engine_fn) -> str:
     """判断引擎吃 DataFrame 还是 numpy 数组：返回 "array" 或 "df"。
 
     策略：先试 ndarray（数组派特征）。若引擎能处理 ndarray → array；
     否则试 DataFrame。个别 DataFrame 派引擎误接受 ndarray 会判 array，
     但 ndarray 派引擎必然抓取正确，且归一化后结果一致，故可接受。
+
+    结果按引擎函数缓存（engine_fn 为 def/lambda 可哈希），避免对每只
+    股票重复探测（原实现 500 只股票探测 500 次，纯浪费）。
     """
     # probe 用 120 根：足够覆盖长窗口指标(MA60/MACD等)，避免数据不足误判
     n = 120
