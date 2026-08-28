@@ -201,6 +201,9 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 - **trailing 止损防重复计**：新增 `test_trailing_stop_no_double_count` 锁定
 - **tp/be 参数注明**：docstring 说明 tp/be 仅 trailing 生效，signal/long_only 忽略
 - **compute_atr 短数据崩溃**：修复窗口只有几根K线时 ATR 广播崩溃
+- **CLI `--be` 参数失效**：改为 `--no-be`，可真正关闭保本开关（原 `--be` 恒为 True 关不掉）
+- **`evaluate_engine` 默认抽样硬编码路径**：改用 `shutil.which` 探测 easy-tdx，修后默认 500 只可正常跑
+- **`compute_atr` 短数据越界**：加 n<2 guard，防空/单根K线崩
 
 ### v1.2
 

@@ -9,9 +9,14 @@
 - **trailing 止损平仓防重复计**：新增 `test_trailing_stop_no_double_count`，锁定某日触发止损平仓后不重复走 else 持仓收益，防将来改挂。
 - **tp/be 参数注明**：`single_daily_rets` / `portfolio_performance` 的 docstring 注明 tp(移动止盈)/be(保本) 仅 `exit_mode="trailing"` 生效，signal / long_only 忽略，防参数名误导。
 - **compute_atr 短数据崩溃**：WF 每窗独立回测时窗口只有几根K线（n < period），ATR 冷启动段广播形状不匹配崩溃，改为边界安全填充。
+- **CLI `--be` 参数失效**：`--be` 用 `action='store_true'` + `default=True`，无论是否传参 `be` 恒为 True，用户无法关闭保本开关。改为 `--no-be`（`action='store_false'` + `default=True`），缺省保持默认开，加参数则关闭。
+- **`evaluate_engine` 默认抽样硬编码路径失效**：`codes=None`（默认）时股票池拉取写死 `/home/node/.openclaw/workspace/tools/easy_tdx_test/.venv/bin/easy-tdx`，该路径仅存在原作者 openclaw 容器，他处不存在导致默认 500 只直接崩。改用 `shutil.which("easy-tdx")` 探测 PATH，找不到时报清晰错误（提示安装或显式传 `codes`）。修后默认 500 只可正常跑。
+- **`compute_atr` 短数据越界**：n<2（空/单根K线）时 `tr[1]` 越界 `IndexError`，v1.2.1 只修了短数据广播崩溃，n=0/1 极端边界仍在。加 `n<2` guard 返回全 1 安全值。
 
 ### 验证
 - 回归测试 7/7 通过（含新增 trailing 止损测试）
+- `compute_atr` n=0/1/2 不再崩
+- `evaluate_engine`（不传 `codes`）默认 500 只跑通，通过 488 只，结果与手造股票池一致（MACD 金叉死叉 +288.75%）
 
 ## [v1.2] - 2026-08-27
 
