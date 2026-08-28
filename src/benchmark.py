@@ -132,12 +132,18 @@ def evaluate_engine(
         }
 
     t0 = time.time()
-    # 被测引擎
+    # 被测引擎（拿到实际判出的 exit_mode，供参考引擎同规则对比）
     your = run_one("被测引擎", engine_fn, exit_mode)
-    # 参考引擎对照（用 reference_exit_mode，可与被测引擎同模式）
+    your_em = your["exit_mode"]
+    # 参考引擎对照：exit_mode="auto" 时用被测引擎判出的模式（同规则对比，评分公平）；
+    # 显式 exit_mode 时用 reference_exit_mode（用户可指定同规则）
+    if exit_mode == "auto":
+        ref_em = your_em
+    else:
+        ref_em = reference_exit_mode
     refs = []
     for rn, rf in REFERENCE_ENGINES.items():
-        refs.append(run_one(rn, rf, reference_exit_mode))
+        refs.append(run_one(rn, rf, ref_em))
 
     # 对被测引擎 + 所有参考引擎算相对基准评分(看最强)
     all_eng = [your] + refs

@@ -182,7 +182,7 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 | `reference_exit_mode` | 参考对照引擎的出场模式 | signal |
 | `th` | 信号阈值 | 25 |
 
-> `exit_mode="auto"` 会按信号特征自动判：有卖出信号→signal，只买不卖→trailing/long_only。
+> `exit_mode="auto"` 会按信号特征自动判：有卖出信号→signal，只买不卖→trailing/long_only。**auto 模式下参考引擎会同步被测引擎判出的出场模式**（同规则对比，评分公平）；显式指定 `exit_mode` 时，参考引擎用 `reference_exit_mode`。
 > 数组派引擎的 K线列序固定为 `KL_COLUMNS = [open, high, low, close, vol]`，可用 `from src import KL_COLUMNS` 引用避免硬编码。
 
 ## 核心概念

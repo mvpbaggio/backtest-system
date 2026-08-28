@@ -170,6 +170,22 @@ def test_third_party_engines_run():
         print(f"  ✅ {name} 引擎跑通")
 
 
+# ---- 测试5：exit_mode="auto" 时参考引擎同规则对比（评分公平） ----
+def test_auto_mode_reference_same_rule():
+    """被测引擎 auto 判出模式后，参考引擎应同步该模式，保证同规则对比。"""
+    codes = ["sh600000", "sh601318", "sz000001"]
+
+    # 只买不卖引擎（无卖出信号）→ auto 判 trailing
+    def long_only_engine(df):
+        c = df["close"].to_numpy()
+        ma20 = pd.Series(c).rolling(20).mean().to_numpy()
+        return np.where(c > ma20, 50, 0)
+
+    r = evaluate_engine(long_only_engine, codes=codes, n_sample=None, exit_mode="auto")
+    assert r["your"]["exit_mode"] == r["reference"][0]["exit_mode"], \
+        "auto 模式下被测与参考引擎出场模式应一致（同规则对比）"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
