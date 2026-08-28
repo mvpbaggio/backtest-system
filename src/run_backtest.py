@@ -75,7 +75,8 @@ if __name__ == "__main__":
     ap.add_argument("--signal", default="demo", choices=["demo"])
     ap.add_argument("--th", type=float, default=25)
     ap.add_argument("--tp", type=float, default=2.5)
-    ap.add_argument("--be", dest="be", action="store_true", default=True)
+    ap.add_argument("--no-be", dest="be", action="store_false", default=True,
+                    help="禁用保本开关(默认开: 盈利超1ATR后止损上移到成本价)")
     ap.add_argument("--exit-mode", dest="exit_mode", default="signal",
                     choices=["signal", "trailing", "long_only"],
                     help="出场模式: signal=有买有卖(默认) / trailing=趋势止损止盈 / long_only=只买不卖")

@@ -68,13 +68,13 @@ python -m src.run_backtest sh600000 sh601318 sz000001
 ### 3. CLI 参数说明
 
 ```bash
-python -m src.run_backtest <codes...> [--signal demo] [--th 25] [--tp 2.5] [--be] [--exit-mode signal]
+python -m src.run_backtest <codes...> [--signal demo] [--th 25] [--tp 2.5] [--no-be] [--exit-mode signal]
 
 # codes:       股票代码，格式 sh600000 / sz000001 / bj920821（可多只）
 # --signal:    信号来源，目前只有 demo（默认）
 # --th:        信号阈值，sig>=th 才触发买入（默认 25）
 # --tp:        移动止盈，距高点 tp × ATR 回落出场（默认 2.5，设 -1 禁用）
-# --be:        保本开关，盈利超 1 ATR 后止损上移到成本价（默认开）
+# --no-be:      禁用保本开关，盈利超 1 ATR 后止损上移到成本价（默认开，加此参数关闭）
 # --exit-mode: 出场模式 signal=有买有卖(默认) / long_only=只买不卖 / trailing=趋势止损止盈
 ```
 
