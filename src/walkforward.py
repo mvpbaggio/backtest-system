@@ -55,13 +55,18 @@ def walk_forward(
         # 避免「全历史入场持仓跨窗」导致两个窗口重复算同一笔钱(严格OOS)。
         daily: dict[str, list[float]] = {}
         for code, df in data.items():
+            if code not in sig:   # 该股数据自检被剔除/无信号 → 跳过
+                continue
             dcol = df["date"].to_numpy()
             # 截取落在窗口内的行索引
             idx = np.where((dcol >= d_start) & (dcol <= d_end))[0]
             if len(idx) < 2:
                 continue
             df_win = df.iloc[idx].reset_index(drop=True)
-            sig_win = np.asarray(sig[code])[idx]
+            s_arr = np.asarray(sig[code])
+            if len(s_arr) < len(df):   # 信号长度与K线不一致(异常) → 防御跳过
+                continue
+            sig_win = s_arr[idx]
             eq, _ = single_daily_rets(df_win, sig_win, th, tp, be, commission, stamp_tax, slippage, exit_mode)
             tot = eq["total"].to_numpy()
             dayrets = np.diff(tot) / tot[:-1]

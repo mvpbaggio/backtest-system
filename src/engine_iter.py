@@ -32,6 +32,7 @@ import pandas as pd
 
 from .backtest import portfolio_performance
 from .walkforward import walk_forward
+from .data_source import sanity_check
 
 # 复用 easy-tdx 数据结构（纯数据，零依赖其回测引擎）
 try:
@@ -188,7 +189,15 @@ def evaluate(name: str, params: dict[str, Any], data: dict[str, pd.DataFrame],
     min_trades: 交易次数低于此值视为假象(信号过稀)，返回 None（供上层过滤）。
     """
     engine = build_engine(name, skip_bounds=skip_bounds, **params)
-    sig = {c: engine(df) for c, df in data.items()}
+    sig = {}
+    for c, df in list(data.items()):
+        try:
+            sanity_check(df, c)  # 数据自检：残留除权假跳变等脏数据直接剔除
+            sig[c] = engine(df)
+        except AssertionError:
+            continue  # 脏数据(残留除权跳变)剔除，不污染组合
+    if not sig:
+        return None
     m = portfolio_performance(data, sig, th=th, tp=tp, be=be, exit_mode=exit_mode)
     wf = walk_forward(data, sig, th=th, tp=tp, be=be, exit_mode=exit_mode)
     total = m.get("total_return", 0) * 100

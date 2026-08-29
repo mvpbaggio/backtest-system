@@ -27,20 +27,23 @@ except ImportError:
 
 
 def _mk_data(seed=0, n=200, n_symbols=3):
-    """合成多标的K线数据（含 date 列，供 walk_forward/portfolio 用）。"""
+    """合成多标的K线数据（含 date 列，波动控制在主板涨跌停内，供 sanity 通过）。"""
     rng = np.random.default_rng(seed)
     data = {}
+    codes = ["sh600000", "sh600001", "sh600002", "sh600003"]
     for i in range(n_symbols):
-        c = 10 + np.cumsum(rng.normal(0, 0.2, n))
+        # 平滑随机游走，单日波动 <8% 确保不触发 sanity 残留除权检查
+        c = 10 + np.cumsum(rng.normal(0, 0.03, n))
+        c = np.clip(c, c[0] * 0.5, c[0] * 2.0)  # 价格保持在正区间
         df = pd.DataFrame({
             "date": pd.date_range("2020-01-01", periods=n).strftime("%Y-%m-%d"),
-            "open": c + rng.normal(0, 0.1, n),
-            "high": c + np.abs(rng.normal(0, 0.2, n)),
-            "low": c - np.abs(rng.normal(0, 0.2, n)),
+            "open": c + rng.normal(0, 0.02, n),
+            "high": c + np.abs(rng.normal(0, 0.02, n) + 0.01),
+            "low": c - np.abs(rng.normal(0, 0.02, n) + 0.01),
             "close": c,
             "vol": rng.integers(1e5, 5e6, n).astype(float),
         })
-        data[f"sym{i}"] = df
+        data[codes[i % len(codes)]] = df
     return data
 
 
@@ -80,14 +83,14 @@ def test_deco_engine_fn_is_original():
     """装饰器注册的 fn 应是原函数（不是 None/包装器），且能用默认参数构建。"""
     assert get_registry()["test_deco"].fn is _test_deco, "装饰器注册的 fn 不是原函数"
     eng = build_engine("test_deco")
-    df = _mk_data()["sym0"]
+    df = _mk_data()["sh600000"]
     sig = eng(df)
     assert len(sig) == len(df), "装饰器构建的引擎输出长度不对"
 
 
 def test_build_engine():
     eng = build_engine("test_ma", fast=5, slow=20)
-    df = _mk_data()["sym0"]
+    df = _mk_data()["sh600000"]
     sig = eng(df)
     assert len(sig) == len(df), "信号长度应等于K线长度"
     assert (sig != 0).any(), "应有信号产生"
@@ -155,7 +158,7 @@ def test_register_two_stage():
                        params=[Param("th", int, default=25, min_value=1, max_value=50)])
     clear_iter_cache()
     eng = build_engine("test_2s", th=25)
-    df = _mk_data()["sym0"]
+    df = _mk_data()["sh600000"]
     sig = eng(df)
     assert len(sig) == len(df), "两段式引擎输出长度不对"
     assert hasattr(eng, "compute_indicators") and hasattr(eng, "signal_from_R"), "应暴露两段式接口"
