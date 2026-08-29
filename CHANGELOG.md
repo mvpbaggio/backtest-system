@@ -31,6 +31,19 @@ portfolio_performance/walk_forward（保留严格样本外WF、自研前复权�
 - **`promotion_ok` 晋级门槛**（防过拟合）：借鉴 tick-stock-panel mining 的 publish 门槛，
   固化需同时满足——正收益 seed 比例≥2/3、平均 Sharpe≥0.5、7窗WF>0、交易数≥min_trades。
 
+### 全面审查修复（6 处隐患）
+- **`signal_from_R` 净票转空卖出丢失**：negmask 用了被清0的 main 判断（应为原始趋势组），
+  导致卖出信号恒不触发。改用原始趋势组 → 与原版 signal_gate_trmob 完全一致(差异=0)。
+- **`signal_from_R` 信号幅值压缩**：硬压成 ±50，丢失 -100~100 连续幅值强弱区分度。
+  复刻原版返回连续幅值。
+- **`optimize_engine` / `compare_engines` 未判 evaluate 返回 None**：全部股票被自检剔除时
+  `r['trades']` NoneType 崩。加 `if r is None` 跳过。
+- **`evaluate` 出 sig 未对齐长度**：用 `align_sig` 与 df 对齐（与 evaluate_engine 一致），防越界。
+- **`_cached` 缓存键冲突**：键用 compute_fn.__name__ 会让同名不同算法引擎冲突，
+  改 `id(compute_fn)` + K线哈希（键隔离）。
+- **防御性加固**：evaluate 数据自检(sanity_check)剔除脏数据(残留除权假跳变)；
+  walk_forward 信号长度不一致的股票防御跳过。
+
 ### 验证
 - 新增 `tests/test_engine_iter.py`：11 个集成测试全过（注册/构建/评估/优化/多seed/
   对比/两段式/晋级门槛）。
