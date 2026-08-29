@@ -33,6 +33,7 @@ import pandas as pd
 from .backtest import portfolio_performance
 from .walkforward import walk_forward
 from .data_source import sanity_check
+from .engine_api import align_sig
 
 # 复用 easy-tdx 数据结构（纯数据，零依赖其回测引擎）
 try:
@@ -163,7 +164,8 @@ _ICACHE: dict = {}
 
 def _cached(compute_fn, kl, max_entries=2000):
     import hashlib
-    key = (compute_fn.__name__, hashlib.sha1(np.ascontiguousarray(kl, dtype=np.float64).tobytes()).hexdigest())
+    # 缓存键 = compute_fn标识(id区分不同引擎, 防同名不同算法冲突) + K线哈希
+    key = (id(compute_fn), hashlib.sha1(np.ascontiguousarray(kl, dtype=np.float64).tobytes()).hexdigest())
     if key in _ICACHE:
         return _ICACHE[key]
     if len(_ICACHE) > max_entries:
@@ -193,7 +195,7 @@ def evaluate(name: str, params: dict[str, Any], data: dict[str, pd.DataFrame],
     for c, df in list(data.items()):
         try:
             sanity_check(df, c)  # 数据自检：残留除权假跳变等脏数据直接剔除
-            sig[c] = engine(df)
+            sig[c] = align_sig(engine(df), len(df))  # 对齐信号长度(防越界)
         except AssertionError:
             continue  # 脏数据(残留除权跳变)剔除，不污染组合
     if not sig:
@@ -272,6 +274,8 @@ def optimize_engine(name: str, param_grid: dict[str, list[Any]],
             r = evaluate(name, params, data, th=th, exit_mode=exit_mode,
                          skip_bounds=skip_bounds)
         except Exception:
+            continue
+        if r is None:   # evaluate 返回 None(全部股票被自检剔除/交易过稀)
             continue
         if r["trades"] < min_trades:
             continue  # 假象（信号过稀）跳过
@@ -374,6 +378,8 @@ def compare_engines(names: list[str], params_list: list[dict[str, Any]],
         try:
             _auto_register_builtin(name)  # 内置引擎自动纳入
             r = evaluate(name, params, data, th=th, exit_mode=exit_mode)
+            if r is None:
+                continue  # evaluate 返回 None(全部股票被剔)
             if r["trades"] < min_trades:
                 continue  # 假象跳过
             r["engine"] = name

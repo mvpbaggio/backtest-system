@@ -175,6 +175,37 @@ def test_promotion_ok():
     assert r["avg"] is not None, "放宽门槛应有平均绩效"
 
 
+def test_evaluate_none_on_all_rejected():
+    """全部股票被数据自检剔除时，evaluate 返回 None(而非崩)。"""
+    from src.engine_iter import evaluate, clear_iter_cache
+    # 构造只有1只且数据不足(<20行)的 data, 会被 sanity_check 剔除
+    df = pd.DataFrame({"date": ["2023-01-01", "2023-01-02"], "open": [1.0,1.0],
+                       "high": [1.1,1.1], "low": [0.9,0.9], "close": [1.0,1.0], "vol": [1e6,1e6]})
+    clear_iter_cache()
+    r = evaluate("test_ma", {"fast": 5, "slow": 20}, {"sh600000": df})
+    assert r is None, "数据不足应返回 None"
+
+
+def test_cache_key_isolated():
+    """缓存键用 id 区分不同 compute_fn，防止同名不同算法引擎冲突。"""
+    from src.engine_iter import _cached, _ICACHE
+    _ICACHE.clear()
+
+    def fn1(kl):
+        return {"close": kl[:, 2].copy()}
+
+    def fn2(kl):
+        return {"close": kl[:, 2].copy() * 2}  # 同名潜在冲突, 用不同id
+
+    kl = np.random.randn(30, 5).astype(np.float64)
+    r1 = _cached(fn1, kl); r2 = _cached(fn2, kl)
+    assert r1["close"][0] == kl[0, 2], "fn1 缓存应返回 fn1 结果(不被 fn2 污染)"
+    assert r2["close"][0] == kl[0, 2] * 2, "fn2 缓存应返回 fn2 结果"
+    # 同一 compute_fn 同一 kl 命中缓存
+    r1b = _cached(fn1, kl)
+    assert r1b is r1, "同一 compute_fn+kl 应命中缓存"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
