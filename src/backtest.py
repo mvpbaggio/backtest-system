@@ -48,7 +48,9 @@ def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> np.ndarray:
     # 边界安全：当 n < period 时只填到可用根数，防止广播形状不匹配
     cold_len = min(period - 1, n - 1)
     if cold_len >= 1:
-        cold = csum[1:cold_len + 1] / denom[:cold_len]
+        # ⚠️ csum=[0]+cumsum(tr), 所以 csum[1]=tr[0]=0(无前一根)。正确应从 csum[2] 起，
+        # csum[2]=tr[1]。之前用 csum[1:cold_len+1] 让第一项=0 → atr[1]被兜底成1e-9(BUG4)。
+        cold = csum[2:cold_len + 2] / denom[:cold_len]
         atr[1:cold_len + 1] = cold
     # 正式段(period..n)：窗口 period
     if n >= period:
@@ -135,8 +137,10 @@ def single_daily_rets(
             exit_px = float(o[i])
             # 净值乘数 = exit_px/c[i-1] * (1-sell_cost)，含成本；pnl 记录收益率
             nav *= (exit_px / c[i - 1]) * (1 - sell_cost)
+            # ⚠️ pnl 用「从买入价 entry 到卖出价的整段收益」(与期末平仓同口径)，
+            # 之前用 exit_px/c[i-1] 只算单日，导致 win_rate 混算"单日/整段"失真(BUG3)
             trades.append({"date": dates[i], "direction": "SELL",
-                           "pnl": exit_px / c[i - 1] - 1 - sell_cost, "rejected": False,
+                           "pnl": exit_px / entry - 1 - sell_cost, "rejected": False,
                            "entry_date": entry_date})
             holding = False; entry = 0.0; hi = 0.0
             pending_sell = False
@@ -156,8 +160,10 @@ def single_daily_rets(
                 exit_px = o[i] if o[i] < stop else stop   # 跳空低开按更差开盘价
                 ret = exit_px / c[i - 1] - 1 - sell_cost
                 nav *= (1 + ret)
+                # 整段收益(相对买入价entry)，与 signal 模式/期末平仓同口径(BUG3)
                 trades.append({"date": dates[i], "direction": "SELL",
-                               "pnl": ret, "rejected": False, "entry_date": entry_date})
+                               "pnl": exit_px / entry - 1 - sell_cost, "rejected": False,
+                               "entry_date": entry_date})
                 holding = False; entry = 0.0; hi = 0.0
             else:
                 nav *= (1 + (c[i] / c[i - 1] - 1))
@@ -208,7 +214,14 @@ def portfolio_performance(
     """
     from easy_tdx.backtest.performance import PerformanceAnalyzer
 
+    # ⚠️ 用第一只(锚定)股票的日期范围作为组合时间轴边界(BUG1修复)
+    # 避免日期完全不重叠的股票(如不同上市年份)把净值曲线拖出统一日历区间。
     anchor_dates = data[list(data.keys())[0]]["date"].to_numpy()
+    # 锚定日期必须单调，否则用 min/max 兜底
+    if len(anchor_dates) > 1 and anchor_dates[-1] >= anchor_dates[0]:
+        a_lo, a_hi = anchor_dates[0], anchor_dates[-1]
+    else:
+        a_lo, a_hi = min(anchor_dates), max(anchor_dates)
     daily_map: dict[str, list[float]] = {d: [] for d in anchor_dates}
     all_trades = []
 
@@ -220,7 +233,9 @@ def portfolio_performance(
         dayrets = np.diff(tot) / tot[:-1]
         own_dates = data[code]["date"].to_numpy()
         for d, r in zip(own_dates[1:], dayrets):
-            daily_map.setdefault(d, []).append(r)
+            # ⚠️ 只接受锚定时间范围内的日期，剔除时间轴完全不重叠的股票(BUG1)
+            if a_lo <= d <= a_hi:
+                daily_map.setdefault(d, []).append(r)
         if len(tds):
             all_trades.append(tds)
 

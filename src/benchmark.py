@@ -54,7 +54,15 @@ def score_engine(e: dict, best: dict) -> float:
 
     total_ = 50 * _cap(e["total"] / best["total"]) if best["total"] else 0
     sharpe_ = 15 * _cap(e["sharpe"] / best["sharpe"]) if best["sharpe"] else 0
-    mdd_ = 10 * _cap(best["mdd"] / e["mdd"]) if (e["mdd"] and best["mdd"]) else 0
+    # ⚠️ mdd 存负数(回撤)。用绝对值算"回撤越小分越高"；
+    # mdd=0(无回撤,最优)给满分,不短路为0(BUG2)。
+    e_mdd_abs = abs(e["mdd"]); b_mdd_abs = abs(best["mdd"])
+    if e_mdd_abs == 0:
+        mdd_ = 10 * 1.2   # 无回撤 = 最优, 顶格满分
+    elif b_mdd_abs == 0:
+        mdd_ = 0
+    else:
+        mdd_ = 10 * _cap(b_mdd_abs / e_mdd_abs)  # 回撤越小(分母小)分越高
     sortino_ = 5 * _cap(e["sortino"] / best["sortino"]) if best["sortino"] else 0
     wf_ = 20 * _cap(max(0.0, e["wf_total"]) / best["wf"]) if best["wf"] else 0
     return round(total_ + sharpe_ + mdd_ + sortino_ + wf_, 3)
