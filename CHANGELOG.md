@@ -2,6 +2,33 @@
 
 记录回测系统的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [v1.4] - 2026-08-29
+
+### 新增：引擎自我迭代系统（src/engine_iter.py）
+借鉴 easy-tdx 的架构（register_strategy 注册表模式 + ParamGridOptimizer 思路），
+打造规范化的「引擎参数化 + 多引擎对比 + 自适应搜索」系统，回测用本项目的
+portfolio_performance/walk_forward（保留严格样本外WF、自研前复权优势）。
+
+- **`register_engine` 引擎注册表**：多引擎统一登记，参数自描述（list[Param]），
+  供优化器/对比引擎发现。复用 easy-tdx 的 `Param` 数据结构（未装则回退内置简化版）。
+- **`build_engine(name, **params)` 参数化构建**：任意参数组合 → 引擎函数闭包。
+- **`evaluate(name, params, data)` 单引擎评估**：对接回测系统，输出收益/夏普/回撤/
+  泛化7窗WF + 综合评分（score = 收益 - 0.3×回撤 + 0.1×7窗WF）。
+- **`optimize_engine(name, param_grid, data)` 参数网格优化**：笛卡尔积遍历，
+  每组合跑回测系统评估，按目标排序（total/score/wf），`min_trades` 过滤假象（信号过稀）。
+- **`multi_seed_validate(name, params, data_by_seed)` 多seed验证**：防过拟合，取平均。
+- **`compare_engines(names, params_list, data)` 多引擎横向对比**：多引擎同池竞争，按评分排序。
+
+### 验证
+- 新增 `tests/test_engine_iter.py`：6 个集成测试全过（注册/构建/评估/优化/多seed/对比）。
+- 回归测试 7/7、兼容测试（v1.3）5/5 通过。
+- 注册 BIG-A + 内置MACD 验证：注册表、参数化、网格搜索全链路可用。
+- 复用 easy-tdx Param（未装 fallback 内置简化版），不依赖其回测引擎。
+
+### 说明
+- 为下一个项目「引擎自我迭代系统」打基础：注册任意引擎 → 参数化 → 自动搜参 →
+  多seed验证 → 多引擎对比，全部跑在本项目严格回测引擎上。
+
 ## [v1.3] - 2026-08-28
 
 ### 新增：全兼容引擎接口

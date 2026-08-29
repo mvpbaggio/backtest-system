@@ -202,7 +202,36 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 
 ## 版本历史
 
-### v1.3（当前）
+### v1.4（当前）
+
+**引擎自我迭代系统**（`src/engine_iter.py`）：借鉴 easy-tdx 架构（注册表+参数化+优化器思路），打造规范化引擎迭代闭环，回测跑在本项目严格引擎上（保留严格样本外WF、自研前复权优势）。
+
+- **`register_engine` 引擎注册表**：多引擎统一登记 + 参数自描述，复用 easy-tdx `Param` 数据结构
+- **`evaluate` / `build_engine`**：参数化构建引擎 + 单引擎评估（含综合评分）
+- **`optimize_engine`**：参数网格搜索，按目标排序，`min_trades` 过滤假象
+- **`multi_seed_validate`**：多seed验证防过拟合；**`compare_engines`**：多引擎横向对比
+- 为下一个项目「引擎自我迭代系统」打基础
+
+**典型用法：**
+```python
+from src import register_engine, optimize_engine, compare_engines
+from easy_tdx.backtest.strategies.registry import Param
+
+# 注册一个引擎（参数自描述）
+@register_engine("my_engine", "我的引擎", params=[Param("th", int, default=25, min_value=1, max_value=50)])
+def my_engine(df, th=25):
+    ...  # 返回与 df 等长的 sig 数组
+    return sig
+
+# 网格搜索优化参数（跑在本项目回测系统上）
+res = optimize_engine("my_engine", {"th": [10, 25, 40]}, data, objective="score")
+print(res["best"])
+
+# 多引擎横向对比
+rows = compare_engines(["my_engine", "MACD金叉死叉"], [{"th": 25}, {}], data)
+```
+
+### v1.3
 
 **全兼容引擎接口**：`evaluate_engine` 移除 `use_kl_array` 全局开关，改为协议层 `src/engine_api.py` 自动适配引擎输入（DataFrame 派 / 数组派 / 带参派）。
 
