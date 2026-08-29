@@ -122,6 +122,24 @@ def test_multi_seed_validate():
     assert "total" in res["avg"], "平均应含收益"
 
 
+def test_compare_engines_builtin_auto():
+    """内置参考引擎名（MACD金叉死叉）应自动注册纳入对比，无需手动注册。"""
+    data = _mk_data()
+    rows = compare_engines(["MACD金叉死叉"], [{}], data, min_trades=0)
+    assert len(rows) == 1, "内置引擎应自动注册并纳入对比"
+    assert rows[0]["engine"] == "MACD金叉死叉", "应识别内置引擎名"
+
+
+def test_optimize_random_mode():
+    """random 搜索模式应能找到最优，且不因网格爆炸报错。"""
+    data = _mk_data()
+    res = optimize_engine("test_ma", {"fast": [2,3,4,5,6,7,8,9,10], "slow": [10,20,30,40,50,60]},
+                          data, objective="total", min_trades=0, search_mode="random", n_rand=10, seed=42)
+    assert "best" in res and res["best"] is not None, "random 模式应找到最优"
+    assert res["searched"] <= 10, "random 模式采样数应受 n_rand 限制"
+    assert "fast" in res["best"]["params"], "最优应含参数"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

@@ -155,35 +155,55 @@ def optimize_engine(name: str, param_grid: dict[str, list[Any]],
                     data: dict[str, pd.DataFrame],
                     objective: str = "total", th: float = 25,
                     exit_mode: str = "signal", min_trades: int = 5000,
-                    skip_bounds: bool = True,
+                    skip_bounds: bool = True, search_mode: str = "grid",
+                    n_rand: int = 100, seed: int = 42,
                     ) -> dict[str, Any]:
-    """网格搜索引擎参数，按 objective 排序。
+    """搜索引擎参数，按 objective 排序。
 
     objective: "total"(收益) / "score"(综合评分, evaluate里的score) / "wf"(泛化)
     min_trades: 交易次数低于此值的组合视为假象(信号过稀)跳过。
     skip_bounds: 寻优时是否跳过参数范围检查(默认True，探索超范围值，学easy-tdx)。
+    search_mode: "grid"(默认,笛卡尔积全遍历) / "random"(随机采样n_rand个,防大空间爆炸)
+    n_rand/seed: random 模式的采样数/随机种子。
     返回 {best, results, secs}。
     """
-    size = 1
-    for vals in param_grid.values():
-        size *= len(vals)
-    if size > MAX_GRID_POINTS:
-        raise ValueError(f"网格大小 {size} 超过上限 {MAX_GRID_POINTS}")
-
     names = list(param_grid.keys())
     value_lists = [param_grid[n] for n in names]
+    size = 1
+    for vals in value_lists:
+        size *= len(vals)
+    if size > MAX_GRID_POINTS and search_mode == "grid":
+        raise ValueError(f"网格大小 {size} 超过上限 {MAX_GRID_POINTS}，"
+                         f"请改用 search_mode='random' 或减少参数取值")
+
+    # 生成要搜索的组合列表
+    if search_mode == "random":
+        rng = np.random.default_rng(seed)
+        combos = []
+        total = min(n_rand, size)  # 随机采样，不重复
+        seen = set()
+        attempts = 0
+        while len(combos) < total and attempts < total * 50:
+            idx = tuple(rng.integers(0, len(vl)) for vl in value_lists)
+            attempts += 1
+            if idx in seen:
+                continue
+            seen.add(idx)
+            combos.append(idx)
+    else:
+        combos = list(itertools.product(*[range(len(vl)) for vl in value_lists]))
+
     results = []
     t0 = time.time()
-    for combo in itertools.product(*value_lists):
-        params = dict(zip(names, combo))
+    for idx in combos:
+        params = {name: value_lists[i][idx[i]] for i, name in enumerate(names)}
         try:
             r = evaluate(name, params, data, th=th, exit_mode=exit_mode,
                          skip_bounds=skip_bounds)
         except Exception:
             continue
         if r["trades"] < min_trades:
-            # 假象（信号过稀），跳过但不中断
-            continue
+            continue  # 假象（信号过稀）跳过
         if objective == "score":
             score = r["score"]   # 用 evaluate 里的综合评分
         elif objective == "wf":
@@ -194,7 +214,7 @@ def optimize_engine(name: str, param_grid: dict[str, list[Any]],
 
     results.sort(key=lambda r: r["__score"], reverse=True)
     best = results[0] if results else None
-    return {"best": best, "results": results, "secs": time.time() - t0}
+    return {"best": best, "results": results, "secs": time.time() - t0, "searched": len(combos)}
 
 
 # ── 多 seed 验证 ──────────────────────────────────────────────────────────
@@ -221,19 +241,35 @@ def multi_seed_validate(name: str, params: dict[str, Any],
 
 
 # ── 多引擎横向对比 ────────────────────────────────────────────────────────
+def _auto_register_builtin(name: str) -> None:
+    """若 name 是内置参考引擎（REFERENCE_ENGINES），自动注册进本系统注册表。"""
+    if name in _ENGINE_REGISTRY:
+        return
+    try:
+        from .engines import REFERENCE_ENGINES
+        if name in REFERENCE_ENGINES:
+            fn = REFERENCE_ENGINES[name]
+            _ENGINE_REGISTRY[name] = RegisteredEngine(
+                name=name, label=name, fn=fn, params=[], description="内置参考引擎",
+            )
+    except Exception:
+        pass
+
+
 def compare_engines(names: list[str], params_list: list[dict[str, Any]],
                     data: dict[str, pd.DataFrame], th: float = 25,
                     exit_mode: str = "signal", min_trades: int = 5000,
                     ) -> list[dict[str, Any]]:
     """多引擎横向对比：各自评估，按 score 排序。
 
-    names: 引擎名列表（须已在注册表）。
+    names: 引擎名列表（须已在注册表，或为内置参考引擎名[自动注册]）。
     params_list: 与 names 对应的参数 dict 列表。
     返回按 score 降序的列表，每项含引擎名/参数/收益/回撤/泛化/评分。
     """
     rows = []
     for name, params in zip(names, params_list):
         try:
+            _auto_register_builtin(name)  # 内置引擎自动纳入
             r = evaluate(name, params, data, th=th, exit_mode=exit_mode)
             if r["trades"] < min_trades:
                 continue  # 假象跳过
