@@ -122,11 +122,13 @@ def build_engine(name: str, skip_bounds: bool = False, **params) -> Callable[[pd
 # ── 单次评估（对接本项目回测系统） ────────────────────────────────────────
 def evaluate(name: str, params: dict[str, Any], data: dict[str, pd.DataFrame],
              th: float = 25, tp: float = 2.5, be: bool = True,
-             exit_mode: str = "signal", skip_bounds: bool = False) -> dict[str, Any]:
+             exit_mode: str = "signal", skip_bounds: bool = False,
+             min_trades: int = 0) -> dict[str, Any] | None:
     """用回测系统评估一个引擎参数的绩效。返回 dict（含评分用字段）。
 
     score = 综合评分（收益为主 + 泛化/夏普加成），供多目标优化。
     skip_bounds: 构建引擎时跳过参数范围检查（供优化器探索超范围值）。
+    min_trades: 交易次数低于此值视为假象(信号过稀)，返回 None（供上层过滤）。
     """
     engine = build_engine(name, skip_bounds=skip_bounds, **params)
     sig = {c: engine(df) for c, df in data.items()}
@@ -136,13 +138,16 @@ def evaluate(name: str, params: dict[str, Any], data: dict[str, pd.DataFrame],
     sharpe = m.get("sharpe", 0)
     mdd = m.get("max_drawdown", 0) * 100
     wf_total = wf["wf_total"]
+    trades = m.get("total_trades", 0)
+    if trades < min_trades:
+        return None  # 假象（信号过稀），上层过滤
     # 综合评分：收益为主，惩罚回撤，奖励泛化（量纲统一：都是百分数）
     # score = 收益 - 0.3×回撤 + 0.1×7窗WF   （收益越高分越高，回撤越小分越高，泛化强加分）
     score = total - 0.3 * mdd + 0.1 * max(0.0, wf_total)
     return {
         "total": total, "sharpe": sharpe, "mdd": mdd,
         "sortino": m.get("sortino", 0), "win_rate": m.get("win_rate", 0),
-        "trades": m.get("total_trades", 0), "wf_total": wf_total,
+        "trades": trades, "wf_total": wf_total,
         "score": score, "params": params,
     }
 
