@@ -64,8 +64,25 @@ register_engine("test_ma", "测试双均线", _ma_cross, params=[
 ])
 
 
+# 装饰器用法（README 示例方式，回归 Bug：装饰器缺 fn 参数会崩）
+@register_engine("test_deco", "装饰器测试", params=[Param("th", int, default=25)])
+def _test_deco(df, th=25):
+    c = df["close"].to_numpy()
+    return np.where(c > 0, 50, 0)
+
+
 def test_registry_has_engine():
     assert "test_ma" in get_registry(), "引擎未注册"
+    assert "test_deco" in get_registry(), "装饰器注册失败"
+
+
+def test_deco_engine_fn_is_original():
+    """装饰器注册的 fn 应是原函数（不是 None/包装器），且能用默认参数构建。"""
+    assert get_registry()["test_deco"].fn is _test_deco, "装饰器注册的 fn 不是原函数"
+    eng = build_engine("test_deco")
+    df = _mk_data()["sym0"]
+    sig = eng(df)
+    assert len(sig) == len(df), "装饰器构建的引擎输出长度不对"
 
 
 def test_build_engine():

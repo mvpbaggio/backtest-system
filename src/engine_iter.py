@@ -72,7 +72,7 @@ _ENGINE_REGISTRY: dict[str, RegisteredEngine] = {}
 def register_engine(
     name: str,
     label: str,
-    fn: Callable[[pd.DataFrame], np.ndarray],
+    fn: Callable[[pd.DataFrame], np.ndarray] | None = None,
     params: list[Param] | None = None,
     description: str = "",
 ) -> Callable:
@@ -87,8 +87,10 @@ def register_engine(
         )
         return _fn
 
-    # 直接传入 fn → 立即注册并返回 fn
-    return _do_register(fn)
+    # 直接传入 fn → 立即注册并返回 fn；否则返回装饰器(等 fn 传入)
+    if fn is not None:
+        return _do_register(fn)
+    return _do_register
 
 
 def get_registry() -> dict[str, RegisteredEngine]:
@@ -96,14 +98,17 @@ def get_registry() -> dict[str, RegisteredEngine]:
 
 
 # ── 参数化 + 引擎构建 ──────────────────────────────────────────────────────
-def build_engine(name: str, **params) -> Callable[[pd.DataFrame], np.ndarray]:
-    """按参数构建一个引擎函数（闭包捕获参数）。"""
+def build_engine(name: str, skip_bounds: bool = False, **params) -> Callable[[pd.DataFrame], np.ndarray]:
+    """按参数构建一个引擎函数（闭包捕获参数）。
+
+    skip_bounds: True 时跳过单参数范围检查（供优化器探索超范围值，学 easy-tdx）。
+    """
     entry = _ENGINE_REGISTRY[name]
     resolved = {}
     for p in entry.params:
         raw = params.get(p.name, p.default)
         if _HAS_EASY:
-            resolved[p.name] = p.validate(raw, skip_bounds=False)
+            resolved[p.name] = p.validate(raw, skip_bounds=skip_bounds)
         else:
             resolved[p.name] = raw
     fn = entry.fn
@@ -117,12 +122,13 @@ def build_engine(name: str, **params) -> Callable[[pd.DataFrame], np.ndarray]:
 # ── 单次评估（对接本项目回测系统） ────────────────────────────────────────
 def evaluate(name: str, params: dict[str, Any], data: dict[str, pd.DataFrame],
              th: float = 25, tp: float = 2.5, be: bool = True,
-             exit_mode: str = "signal") -> dict[str, Any]:
+             exit_mode: str = "signal", skip_bounds: bool = False) -> dict[str, Any]:
     """用回测系统评估一个引擎参数的绩效。返回 dict（含评分用字段）。
 
     score = 综合评分（收益为主 + 泛化/夏普加成），供多目标优化。
+    skip_bounds: 构建引擎时跳过参数范围检查（供优化器探索超范围值）。
     """
-    engine = build_engine(name, **params)
+    engine = build_engine(name, skip_bounds=skip_bounds, **params)
     sig = {c: engine(df) for c, df in data.items()}
     m = portfolio_performance(data, sig, th=th, tp=tp, be=be, exit_mode=exit_mode)
     wf = walk_forward(data, sig, th=th, tp=tp, be=be, exit_mode=exit_mode)
@@ -149,11 +155,13 @@ def optimize_engine(name: str, param_grid: dict[str, list[Any]],
                     data: dict[str, pd.DataFrame],
                     objective: str = "total", th: float = 25,
                     exit_mode: str = "signal", min_trades: int = 5000,
+                    skip_bounds: bool = True,
                     ) -> dict[str, Any]:
     """网格搜索引擎参数，按 objective 排序。
 
-    objective: "total"(收益) / "score"(综合: total+sharpe+max(0,wf)) / "wf"
+    objective: "total"(收益) / "score"(综合评分, evaluate里的score) / "wf"(泛化)
     min_trades: 交易次数低于此值的组合视为假象(信号过稀)跳过。
+    skip_bounds: 寻优时是否跳过参数范围检查(默认True，探索超范围值，学easy-tdx)。
     返回 {best, results, secs}。
     """
     size = 1
@@ -169,14 +177,15 @@ def optimize_engine(name: str, param_grid: dict[str, list[Any]],
     for combo in itertools.product(*value_lists):
         params = dict(zip(names, combo))
         try:
-            r = evaluate(name, params, data, th=th, exit_mode=exit_mode)
+            r = evaluate(name, params, data, th=th, exit_mode=exit_mode,
+                         skip_bounds=skip_bounds)
         except Exception:
             continue
         if r["trades"] < min_trades:
             # 假象（信号过稀），跳过但不中断
             continue
         if objective == "score":
-            score = r["total"] + r["sharpe"] + max(0.0, r["wf_total"]) / 10
+            score = r["score"]   # 用 evaluate 里的综合评分
         elif objective == "wf":
             score = r["wf_total"]
         else:
