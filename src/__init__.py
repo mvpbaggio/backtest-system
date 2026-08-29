@@ -7,6 +7,7 @@ from .engine_api import KL_COLUMNS, normalize_kl, call_engine, detect_input, ali
 from .engine_iter import (
     register_engine, get_registry, build_engine, evaluate,
     optimize_engine, multi_seed_validate, compare_engines,
+    register_two_stage, clear_iter_cache, promotion_ok,
 )
 
 __all__ = ["single_daily_rets", "portfolio_performance",
@@ -15,4 +16,5 @@ __all__ = ["single_daily_rets", "portfolio_performance",
            "evaluate_engine",
            "KL_COLUMNS", "normalize_kl", "call_engine", "detect_input", "align_sig",
            "register_engine", "get_registry", "build_engine", "evaluate",
-           "optimize_engine", "multi_seed_validate", "compare_engines"]
+           "optimize_engine", "multi_seed_validate", "compare_engines",
+           "register_two_stage", "clear_iter_cache", "promotion_ok"]

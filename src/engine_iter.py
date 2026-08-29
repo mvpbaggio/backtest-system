@@ -64,6 +64,7 @@ class RegisteredEngine:
     fn: Callable[[pd.DataFrame], np.ndarray]
     params: list[Param]
     description: str = ""
+    _two_stage: tuple | None = None  # 两段式引擎: (compute_fn, signal_fn)
 
 
 _ENGINE_REGISTRY: dict[str, RegisteredEngine] = {}
@@ -97,11 +98,35 @@ def get_registry() -> dict[str, RegisteredEngine]:
     return _ENGINE_REGISTRY
 
 
+# ── 两段式引擎注册（指标缓存，治迭代慢） ───────────────────────────────────
+def register_two_stage(name: str, label: str, compute_fn, signal_fn,
+                       params: list[Param] | None = None,
+                       description: str = "") -> None:
+    """注册一个「两段式」引擎（借鉴 tick-stock-panel 指标解耦）。
+
+    compute_fn(kl) -> R   纯指标（不依赖搜索参数），算一次缓存
+    signal_fn(R, **params) -> sig   依赖参数（如 min_abs/sell_th），毫秒级
+
+    两段式让 optimize_engine 反复迭代时**指标只算一次**，只重算毫秒级的
+    信号组合层 → 迭代从『每次重算全套指标』降到『毫秒级』。
+    """
+    _ENGINE_REGISTRY[name] = RegisteredEngine(
+        name=name, label=label, fn=None, params=params or [], description=description,
+    )
+    # 用特殊标记存两段式组件（fn 存一个包装标记，供 build_engine 识别）
+    _ENGINE_REGISTRY[name]._two_stage = (compute_fn, signal_fn)
+
+
+def _is_two_stage(entry: "RegisteredEngine") -> bool:
+    return getattr(entry, "_two_stage", None) is not None
+
+
 # ── 参数化 + 引擎构建 ──────────────────────────────────────────────────────
 def build_engine(name: str, skip_bounds: bool = False, **params) -> Callable[[pd.DataFrame], np.ndarray]:
     """按参数构建一个引擎函数（闭包捕获参数）。
 
     skip_bounds: True 时跳过单参数范围检查（供优化器探索超范围值，学 easy-tdx）。
+    两段式引擎 → 返回带 .compute_indicators/.signal_from_R 的加速引擎。
     """
     entry = _ENGINE_REGISTRY[name]
     resolved = {}
@@ -111,12 +136,44 @@ def build_engine(name: str, skip_bounds: bool = False, **params) -> Callable[[pd
             resolved[p.name] = p.validate(raw, skip_bounds=skip_bounds)
         else:
             resolved[p.name] = raw
+    # 两段式：指标缓存 + 信号毫秒级
+    if _is_two_stage(entry):
+        compute_fn, signal_fn = entry._two_stage
+
+        def _engine2(df: pd.DataFrame) -> np.ndarray:
+            kl = df[["open", "high", "low", "close", "vol"]].to_numpy()
+            R = _cached(compute_fn, kl)
+            return np.asarray(signal_fn(R, **resolved), dtype=float)
+
+        _engine2.compute_indicators = staticmethod(lambda kl: _cached(compute_fn, kl))
+        _engine2.signal_from_R = staticmethod(lambda R, **p: signal_fn(R, **{**resolved, **p}))
+        return _engine2
     fn = entry.fn
 
     def _engine(df: pd.DataFrame) -> np.ndarray:
         return fn(df, **resolved)
 
     return _engine
+
+
+# 指标缓存（两段式引擎用，内存）
+_ICACHE: dict = {}
+
+
+def _cached(compute_fn, kl, max_entries=2000):
+    import hashlib
+    key = (compute_fn.__name__, hashlib.sha1(np.ascontiguousarray(kl, dtype=np.float64).tobytes()).hexdigest())
+    if key in _ICACHE:
+        return _ICACHE[key]
+    if len(_ICACHE) > max_entries:
+        _ICACHE.clear()
+    R = compute_fn(kl)
+    _ICACHE[key] = R
+    return R
+
+
+def clear_iter_cache():
+    _ICACHE.clear()
 
 
 # ── 单次评估（对接本项目回测系统） ────────────────────────────────────────
@@ -243,6 +300,38 @@ def multi_seed_validate(name: str, params: dict[str, Any],
     avg["trades"] = int(np.mean([v["trades"] for v in valid.values()]))
     avg["seeds"] = sorted(valid.keys())
     return {"per_seed": per_seed, "avg": avg}
+
+
+# ── 多引擎横向对比 ────────────────────────────────────────────────────────
+def promotion_ok(name: str, params: dict[str, Any], data_by_seed: dict[int, dict[str, pd.DataFrame]],
+                 th: float = 25, exit_mode: str = "signal", min_trades: int = 5000,
+                 min_win_ratio: float = 2 / 3, min_sharpe: float = 0.5,
+                 min_wf: float = 0.0) -> dict[str, Any]:
+    """晋级门槛校验（借鉴 tick-stock-panel mining 的 publish 门槛，防过拟合）。
+
+    只有同时满足以下才标「达标」(可固化)，防止只选最高分而过拟合：
+      - 正收益 seed 比例 ≥ min_win_ratio（跨 seed 都要稳）
+      - 平均 Sharpe ≥ min_sharpe
+      - 7窗WF > min_wf（泛化为正）
+      - 每个 seed 交易数 ≥ min_trades（非假象）
+    返回 {ok, reasons(未达标原因), avg}
+    """
+    v = multi_seed_validate(name, params, data_by_seed, th=th, exit_mode=exit_mode, min_trades=min_trades)
+    avg = v["avg"]
+    reasons = []
+    if avg is None:
+        return {"ok": False, "reasons": ["所有seed无效/假象"], "avg": None}
+    seeds = avg["seeds"]
+    # 正收益 seed 比例
+    pos_seeds = [s for s in seeds if v["per_seed"].get(s) and v["per_seed"][s].get("total", 0) > 0]
+    if len(pos_seeds) / len(seeds) < min_win_ratio:
+        reasons.append(f"正收益seed比例{len(pos_seeds)}/{len(seeds)} < {min_win_ratio:.2f}")
+    if avg["sharpe"] < min_sharpe:
+        reasons.append(f"平均夏普{avg['sharpe']:.2f} < {min_sharpe}")
+    if avg["wf_total"] <= min_wf:
+        reasons.append(f"7窗WF{avg['wf_total']:+.1f}% <= {min_wf}")
+    ok = not reasons
+    return {"ok": ok, "reasons": reasons, "avg": avg}
 
 
 # ── 多引擎横向对比 ────────────────────────────────────────────────────────

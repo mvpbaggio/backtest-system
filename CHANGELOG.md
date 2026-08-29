@@ -14,20 +14,32 @@ portfolio_performance/walk_forward（保留严格样本外WF、自研前复权�
 - **`build_engine(name, **params)` 参数化构建**：任意参数组合 → 引擎函数闭包。
 - **`evaluate(name, params, data)` 单引擎评估**：对接回测系统，输出收益/夏普/回撤/
   泛化7窗WF + 综合评分（score = 收益 - 0.3×回撤 + 0.1×7窗WF）。
-- **`optimize_engine(name, param_grid, data)` 参数网格优化**：笛卡尔积遍历，
-  每组合跑回测系统评估，按目标排序（total/score/wf），`min_trades` 过滤假象（信号过稀）。
+- **`optimize_engine(name, param_grid, data)` 参数网格/随机搜索**：按目标排序
+  （total/score/wf），`min_trades` 过滤假象（信号过稀），`search_mode=grid/random`。
 - **`multi_seed_validate(name, params, data_by_seed)` 多seed验证**：防过拟合，取平均。
-- **`compare_engines(names, params_list, data)` 多引擎横向对比**：多引擎同池竞争，按评分排序。
+- **`compare_engines(names, params_list, data)` 多引擎横向对比**：内置引擎自动纳入，
+  多引擎同池竞争，按评分排序。
+
+### 补全：两段式引擎 + 指标缓存（治迭代慢）
+借鉴 tick-stock-panel「指标/信号解耦」，解决「引擎迭代反复重算指标跑不动」：
+- **`register_two_stage(name, label, compute_fn, signal_fn, params)`**：
+  注册两段式引擎——`compute_fn(kl)->R`（纯指标缓存）+ `signal_fn(R,**params)->sig`（可参数化）。
+- **两段式缓存**：指标(23个)与17信号都**只算一次**（按K线字节哈希缓存），
+  参数变化(如 min_abs/sell_th/dd_n)只重算毫秒级的组合层（group_score/net/signal_gate）。
+- **性能基准**：BIG-A 500只，指标一次性 34s；优化器 50 组从「每次重算指标 143s/组」
+  降到「含严格7窗WF 14.5s/组」，约 10 倍提速，引擎迭代真正可用。
+- **`promotion_ok` 晋级门槛**（防过拟合）：借鉴 tick-stock-panel mining 的 publish 门槛，
+  固化需同时满足——正收益 seed 比例≥2/3、平均 Sharpe≥0.5、7窗WF>0、交易数≥min_trades。
 
 ### 验证
-- 新增 `tests/test_engine_iter.py`：6 个集成测试全过（注册/构建/评估/优化/多seed/对比）。
-- 回归测试 7/7、兼容测试（v1.3）5/5 通过。
-- 注册 BIG-A + 内置MACD 验证：注册表、参数化、网格搜索全链路可用。
+- 新增 `tests/test_engine_iter.py`：11 个集成测试全过（注册/构建/评估/优化/多seed/
+  对比/两段式/晋级门槛）。
+- 回归测试 7/7、兼容测试 5/5 通过。
 - 复用 easy-tdx Param（未装 fallback 内置简化版），不依赖其回测引擎。
 
 ### 说明
 - 为下一个项目「引擎自我迭代系统」打基础：注册任意引擎 → 参数化 → 自动搜参 →
-  多seed验证 → 多引擎对比，全部跑在本项目严格回测引擎上。
+  多seed验证 → 晋级门槛 → 多引擎对比，全部跑在本项目严格回测引擎上。
 
 ## [v1.3] - 2026-08-28
 

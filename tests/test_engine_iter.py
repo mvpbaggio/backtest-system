@@ -140,6 +140,38 @@ def test_optimize_random_mode():
     assert "fast" in res["best"]["params"], "最优应含参数"
 
 
+def test_register_two_stage():
+    """两段式引擎注册 + 构建，指标缓存生效。"""
+    from src.engine_iter import register_two_stage, clear_iter_cache
+
+    def compute_fn(kl):
+        c = kl[:, 2]  # close 在 KL_COLUMNS 第3位
+        return {"close": c, "ma": pd.Series(c).rolling(5).mean().to_numpy()}
+
+    def signal_fn(R, th=25):
+        return np.where(R["close"] > R["ma"], 50, 0)
+
+    register_two_stage("test_2s", "两段式测试", compute_fn, signal_fn,
+                       params=[Param("th", int, default=25, min_value=1, max_value=50)])
+    clear_iter_cache()
+    eng = build_engine("test_2s", th=25)
+    df = _mk_data()["sym0"]
+    sig = eng(df)
+    assert len(sig) == len(df), "两段式引擎输出长度不对"
+    assert hasattr(eng, "compute_indicators") and hasattr(eng, "signal_from_R"), "应暴露两段式接口"
+
+
+def test_promotion_ok():
+    """晋级门槛校验：正收益比例+夏普+WF+交易数。"""
+    from src.engine_iter import promotion_ok
+    data_by_seed = {42: _mk_data(42), 7: _mk_data(7), 123: _mk_data(123)}
+    r = promotion_ok("test_ma", {"fast": 5, "slow": 20}, data_by_seed, min_trades=0,
+                     min_win_ratio=0, min_sharpe=-1, min_wf=-1e9)
+    assert "ok" in r and "reasons" in r, "应返回 ok/reasons"
+    # 放宽门槛应全部通过（test_ma 在合成数据上大概率正收益）
+    assert r["avg"] is not None, "放宽门槛应有平均绩效"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

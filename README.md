@@ -208,27 +208,36 @@ print(f"你的引擎: 收益{result['your']['total']:+.2f}% 夏普{result['your'
 
 - **`register_engine` 引擎注册表**：多引擎统一登记 + 参数自描述，复用 easy-tdx `Param` 数据结构
 - **`evaluate` / `build_engine`**：参数化构建引擎 + 单引擎评估（含综合评分）
-- **`optimize_engine`**：参数网格搜索，按目标排序，`min_trades` 过滤假象
-- **`multi_seed_validate`**：多seed验证防过拟合；**`compare_engines`**：多引擎横向对比
+- **`optimize_engine`**：网格/随机搜索，按目标排序，`min_trades` 过滤假象
+- **`multi_seed_validate`**：多seed验证防过拟合；**`register_two_stage`**：两段式引擎+指标缓存（治迭代慢）
+- **`compare_engines`**：多引擎横向对比（内置自动纳入）；**`promotion_ok`**：晋级门槛防过拟合
 - 为下一个项目「引擎自我迭代系统」打基础
 
 **典型用法：**
 ```python
-from src import register_engine, optimize_engine, compare_engines
+from src import register_engine, register_two_stage, optimize_engine, compare_engines, promotion_ok
 from easy_tdx.backtest.strategies.registry import Param
 
-# 注册一个引擎（参数自描述）
+# 方式一：普通引擎（fn(df) -> sig）
 @register_engine("my_engine", "我的引擎", params=[Param("th", int, default=25, min_value=1, max_value=50)])
 def my_engine(df, th=25):
     ...  # 返回与 df 等长的 sig 数组
     return sig
 
-# 网格搜索优化参数（跑在本项目回测系统上）
+# 方式二：两段式引擎（compute_indicators 缓存 + signal_from_R 毫秒级，迭代快 10 倍）
+register_two_stage("my_engine2", "我的两段式引擎", compute_indicators, signal_from_R,
+                   params=[Param("th", int, default=25, min_value=1, max_value=50)])
+
+# 网格/随机搜索优化参数（跑在本项目回测系统上）
 res = optimize_engine("my_engine", {"th": [10, 25, 40]}, data, objective="score")
 print(res["best"])
 
-# 多引擎横向对比
+# 多引擎横向对比（内置引擎自动纳入）
 rows = compare_engines(["my_engine", "MACD金叉死叉"], [{"th": 25}, {}], data)
+
+# 晋级门槛校验（防过拟合：正收益比例/夏普/WF/交易数）
+ok = promotion_ok("my_engine", {"th": 25}, data_by_seed)
+print(ok["ok"], ok["reasons"])
 ```
 
 ### v1.3
