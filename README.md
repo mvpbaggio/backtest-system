@@ -1,12 +1,15 @@
 # 回测系统 (Backtest System)
 
-一个**聚焦「最真实反映引擎能力」的 A股回测框架**，专门用来**测试你开发的指标引擎（波段策略）**。
+一个**聚焦「最真实反映引擎能力」的 A股回测框架**，专门用来**测试和迭代你开发的指标引擎（波段策略）**。
 
 用 easy-tdx 拉取行情数据（毫秒级、免注册、覆盖 A股/港股/美股/期货），
 自研前复权消除分红除权假跳变，用验证过的高频引擎逻辑做撮合与出场，
 跑**严格 7 窗样本外 Walk-Forward**，把成本算到 A股真实费率。
 
-> ⚠️ 本项目是 **回测框架**。内置 2 个**参考指标引擎**（`src/engines.py`：easy-tdx MyTT MACD / 内置 MACD 金叉死叉，用于对比基准）+ 1 个 demo 信号（收盘>MA20，仅验证链路）。**不构成任何投资建议**。你的真实引擎输出「每日信号分数数组」喂进来即可。
+> ✅ **v1.4 起内置「引擎自我迭代系统」**（`src/engine_iter.py`）：注册任意引擎 → 参数化 →
+> 自动网格/随机搜参 → 多 seed 验证 → 晋级门槛 → 多引擎对比，全部跑在本项目严格回测引擎上。
+
+> ⚠️ 本项目是 **回测框架**。内置 2 个**参考指标引擎**（`src/engines.py`：easy-tdx MyTT MACD / 内置 MACD 金叉死叉，用于对比基准）+ 1 个 demo 信号（收盘>MA20，仅验证链路）。**不构成任何投资建议**。你的真实引擎输出「每日信号分数数组」喂进来即可，或用「引擎自我迭代系统」注册它自动寻优。
 
 ## 为什么这样设计（真实性优先）
 
@@ -30,11 +33,16 @@ backtest-system/
 │   ├── data_source.py     # easy-tdx 拉取 + 自研前复权 + 本地缓存(7天自动更新) + 自检
 │   ├── backtest.py        # 回测核心：单标的逐日收益(双向信号/exit_mode) + 多标的组合绩效
 │   ├── engines.py         # 内置参考引擎：easy-tdx MyTT MACD / 内置 MACD（对比基准）
-│   ├── benchmark.py       # 标准引擎评估接口 evaluate_engine()
-│   ├── walkforward.py     # 严格 7 窗样本外 WF
+│   ├── engine_api.py      # 引擎协议层：统一 fn(df)->sig 接口(DataFrame/数组/带参自动适配)
+│   ├── engine_iter.py     # 引擎自我迭代系统(v1.4)：注册/参数化/搜参/多seed/晋级/对比
+│   ├── benchmark.py       # 标准引擎评估接口 evaluate_engine()(含权威评分score_engine)
+│   ├── walkforward.py     # 严格 7 窗样本外 WF(每窗独立开仓,防跨窗重复)
 │   └── run_backtest.py    # 入口：喂信号 → 组合绩效 + 7窗WF
 ├── tests/
-│   └── test_backtest.py   # 回归测试（性质验证）
+│   ├── test_backtest.py   # 回归测试（性质验证）
+│   ├── test_engine_compat.py # 引擎接口兼容性测试
+│   ├── test_engine_iter.py   # 引擎自我迭代系统测试(13个)
+│   └── test_health.py     # 回测核心体检(ATR/成交/成本/出场/WF, 10项)
 ├── requirements.txt       # easy-tdx, numpy, pandas
 └── cache/                 # 本地K线缓存(运行时生成)
 ```
@@ -116,7 +124,37 @@ wf = walk_forward(data, sig, th=25, tp=2.5, be=True)
 print(f"7窗样本外WF {wf['wf_total']:+.2f}% 窗:{wf['windows']}")
 ```
 
-### 5. 怎么读结果（判断引擎好坏）
+### 5. 引擎自我迭代系统（v1.4 核心）
+
+除了手动喂信号，v1.4 提供**引擎自我迭代系统**（`src/engine_iter.py`）——注册引擎后自动寻优、验证、对比：
+
+```python
+from src import register_two_stage, optimize_engine, multi_seed_validate, compare_engines, promotion_ok
+from easy_tdx.backtest.strategies.registry import Param
+
+# ① 注册引擎（两段式：指标缓存 + 信号毫秒级，迭代快）
+register_two_stage("my_engine", "我的引擎", compute_indicators, signal_from_R,
+                   params=[Param("th", int, default=25, min_value=1, max_value=50)])
+
+# ② 自动网格/随机搜参（跑在本项目严格回测引擎上）
+res = optimize_engine("my_engine", {"th": [10, 25, 40]}, data, objective="score")
+print(res["best"])   # 最优参数 + 收益/夏普/回撤/7窗WF/评分
+
+# ③ 多 seed 验证（防过拟合）
+v = multi_seed_validate("my_engine", {"th": 25}, {42: data, 7: data7, 123: data123})
+print(v["avg"])
+
+# ④ 晋级门槛校验（防过拟合：正收益比例/夏普/WF/交易数）
+ok = promotion_ok("my_engine", {"th": 25}, {42: data, 7: data7})
+print(ok["ok"], ok["reasons"])
+
+# ⑤ 多引擎横向对比（内置引擎自动纳入）
+rows = compare_engines(["my_engine", "MACD金叉死叉"], [{"th": 25}, {}], data)
+```
+
+> **两段式引擎**（`register_two_stage`）：把 "指标计算"（compute_indicators，缓存）和 "信号组合"（signal_from_R，可参数化）解耦。迭代时指标只算一次、只重算毫秒级组合层 → 迭代快 10 倍。
+
+### 6. 怎么读结果（判断引擎好坏）
 
 回测系统输出核心绩效 + 严格 7 窗样本外 WF，从 3 个维度评估你的波段引擎：
 
